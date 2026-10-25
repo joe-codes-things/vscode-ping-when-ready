@@ -1,0 +1,89 @@
+{
+  "name": "ping-when-ready",
+  "displayName": "Ping When Ready",
+  "description": "Notify when a Copilot agent finishes a response in VS Code.",
+  "version": "0.0.1",
+  "publisher": "joe-codes-things",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/joe-codes-things/vscode-ping-when-ready.git"
+  },
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.105.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "scripts": {
+    "compile": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js",
+    "watch": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js --watch",
+    "check-types": "tsc --noEmit",
+    "test": "node --test tests/*.test.cjs",
+    "package": "npm run compile && vsce package"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "pingWhenReady.enableCopilotHook",
+        "title": "Ping When Ready: Enable Copilot Stop Hook"
+      },
+      {
+        "command": "pingWhenReady.disableCopilotHook",
+        "title": "Ping When Ready: Disable Copilot Stop Hook"
+      },
+      {
+        "command": "pingWhenReady.sendTestNotification",
+        "title": "Ping When Ready: Send Test Notification"
+      },
+      {
+        "command": "pingWhenReady.testSignalBridge",
+        "title": "Ping When Ready: Test Signal Bridge"
+      }
+    ],
+    "configuration": {
+      "title": "Ping When Ready",
+      "properties": {
+        "pingWhenReady.notifications.macOS": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a native macOS Notification Center banner when a Copilot agent finishes a turn."
+        },
+        "pingWhenReady.notifications.sound": {
+          "type": "boolean",
+          "default": false,
+          "description": "Play the selected WAV or MP3 sound when a Copilot agent finishes a turn."
+        },
+        "pingWhenReady.soundFile": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to a WAV or MP3 notification sound on this Mac."
+        },
+        "pingWhenReady.notifications.iMessage": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run the configured macOS Shortcut when a Copilot agent finishes a turn. Configure the recipient and message in the Shortcut."
+        },
+        "pingWhenReady.iMessage.shortcutName": {
+          "type": "string",
+          "default": "Ping When Ready",
+          "description": "Name of the user-created macOS Shortcut that sends the iMessage."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@types/vscode": "^1.105.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.10",
+    "typescript": "^5.9.3"
+  }
+}

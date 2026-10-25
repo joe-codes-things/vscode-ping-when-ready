@@ -1,2 +1,6 @@
 .githooks/
 .github/
+.ping-when-ready.signal
+node_modules/
+dist/
+*.vsix
