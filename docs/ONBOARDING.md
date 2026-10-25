@@ -135,18 +135,87 @@ any sound assets supplied or packaged.
 VS Code has no iMessage API. The current optional integration invokes a
 user-created macOS Shortcut by name through Apple's `shortcuts` command-line
 tool. The user must configure its Send Message action and recipient in
-Shortcuts; the extension does not store the phone number. iMessage delivery,
-permissions, Shortcut input requirements, and whether the recipient can
-receive iMessage still need testing. AppleScript/JXA is another possible
-local-machine route, but requires macOS Automation consent.
+Shortcuts; the extension does not store the phone number. This remains
+unvalidated and is disabled by default.
 
-Keep this channel opt-in and off by default, provide a test-send action, and
-send a generic completion notice rather than chat contents. Never use
-undocumented Messages databases or try to bypass macOS consent. A gitignored
-text file is only protected from accidental Git commits; it is not encrypted.
-The current design keeps the recipient in the user's Shortcut so the
-extension never stores it. Research the alternatives before expanding this
-integration.
+Keep this channel opt-in and off by default, and send a generic completion
+notice rather than chat contents. Never use undocumented Messages databases
+or try to bypass macOS consent. A gitignored text file is only protected from
+accidental Git commits; it is not encrypted. The current design keeps the
+recipient in the user's Shortcut so the extension never stores it.
+
+#### Feasibility refresh (2026-10-25)
+
+For a single recipient and fixed completion message, a user-created Shortcut
+remains the simplest first implementation to validate. Apple documents
+running a named Shortcut using `shortcuts run <name>` and says that a
+successful run exits with code 0 and an error exits with code 1. Shortcuts
+that ask for input or show alerts can pause the command-line run, so configure
+the fixed recipient and generic message inside the Shortcut and avoid
+interactive actions. A successful exit confirms Shortcut execution, not
+delivery to the recipient.
+
+A phone number does not guarantee iMessage routing. The Mac's Messages
+configuration and recipient availability determine whether the message uses
+iMessage or another Messages route, including SMS/MMS/RCS when configured.
+Before enabling automatic sends, manually run the Shortcut and verify the
+resulting conversation and message route in Messages.
+
+AppleScript/JXA can automate Messages on this Mac, and the installed Messages
+application includes a scripting dictionary. However, that dictionary is not
+a documented, stable public send API for third-party extensions, and macOS
+Automation consent applies. The exact app identity macOS will show for
+extension-launched automation should be tested on the installed VS Code
+build. Automation grants can be reviewed or revoked in System Settings;
+permission persistence across OS or VS Code identity/signature changes is not
+guaranteed.
+
+No first-party Apple API was found for an unrelated VS Code extension to send
+arbitrary iMessages. Apple's Messages framework is for extensions that run
+inside Messages conversations, not a general desktop sender.
+
+Existing Node packages do not improve on the Shortcut approach for this
+prototype:
+
+- [`osa-imessage`](https://github.com/wtfaremyinitials/osa-imessage) advertises
+  AppleScript-backed sending, but the npm release is version 2.4.2 and its
+  registry metadata was last modified in 2022. Treat modern macOS support as
+  unverified; it is a wrapper around automation, not an Apple messaging API.
+- [`imessage`](https://github.com/nicola/node-imessage) is read-only and
+  accesses local Messages data; it does not send messages.
+- [`imessage-exporter`](https://github.com/ReagentX/imessage-exporter) exports
+  Messages history and is not a sender. Its GPL-3.0 license and history-data
+  access are unnecessary for this feature.
+- [`run-applescript`](https://github.com/sindresorhus/run-applescript) is a
+  maintained generic AppleScript wrapper, not an iMessage library. The
+  extension already has Node's `execFile`, so another dependency is not
+  needed.
+
+#### Recommendation and safeguards
+
+Retain the current Shortcut approach, with the recipient and fixed text stored
+in the user's Shortcut rather than source code, settings, hook arguments, or
+logs. `.gitignore` is not secure storage; VS Code `SecretStorage` would be
+appropriate only if the extension itself must retain the recipient. The
+extension currently stores only the Shortcut's name and invokes
+`/usr/bin/shortcuts` using Node's `execFile` with separate arguments, avoiding
+shell interpolation.
+
+Keep iMessage disabled by default and clearly explain that enabling it sends
+a real message. Currently, **Send Test Notification** also runs the configured
+Shortcut when the iMessage setting is enabled; it can send a real message and
+must not be treated as a harmless local test. Test the Shortcut manually
+first. Before adding an explicit test-send action, show a confirmation that
+clearly states it sends an actual message. Add a timeout for shortcuts that
+pause awaiting input, report command/permission errors without logging the
+recipient or message body, and never describe exit code 0 as proof of message
+delivery. Verify delivery and routing manually in Messages.
+
+macOS Automation permissions can be reviewed and revoked in System Settings.
+Apple's public docs do not promise that permission will persist indefinitely
+through changes to macOS, the VS Code installation, or app identity/signing.
+If using AppleScript/JXA directly, first confirm which app macOS identifies as
+the automation requester on the installed VS Code build.
 
 ### Sources
 
@@ -170,6 +239,17 @@ integration.
 - [Apple: Shortcuts actions](https://support.apple.com/guide/shortcuts-mac/intro-to-shortcuts-apdf22b0444c/10.0/mac/27)
 - [Apple: Allow apps to automate and control other apps](https://support.apple.com/guide/mac-help/allow-apps-to-automate-and-control-other-apps-mchl108e1718/mac)
 - [Apple: Send a message on Mac](https://support.apple.com/guide/messages/send-messages-icht35827/26.0/mac/27)
+- [Apple: Messages on Mac](https://support.apple.com/guide/messages/welcome/mac)
+- [Apple: Forward SMS/MMS/RCS messages from iPhone to Mac](https://support.apple.com/en-us/102545)
+- [Apple: Limit shortcut input and avoid unnecessary prompts](https://support.apple.com/guide/shortcuts-mac/limit-the-input-for-a-shortcut-when-run-from-another-app-apd8195f96d6/mac)
+- [Apple: Messages framework](https://developer.apple.com/documentation/messages.md)
+- [Apple: `NSAppleEventsUsageDescription`](https://developer.apple.com/documentation/bundleresources/information-property-list/nsappleeventsusagedescription.md)
+- [Apple: Automation settings on Mac](https://support.apple.com/guide/mac-help/allow-apps-to-automate-and-control-other-apps-mchl108e1718/mac)
+- [`osa-imessage` npm registry](https://registry.npmjs.org/osa-imessage)
+- [`imessage` npm registry](https://registry.npmjs.org/imessage)
+- [`run-applescript` npm package](https://www.npmjs.com/package/run-applescript)
+- [`imessage-exporter` project](https://github.com/ReagentX/imessage-exporter)
+- [Node.js `child_process.execFile`](https://nodejs.org/api/child_process.html#child_processexecfilefile-args-options-callback)
 - [Apple: Notifications settings on Mac](https://support.apple.com/guide/mac-help/notifications-settings-mh40583/mac)
 
 ### Local validation
@@ -179,6 +259,8 @@ integration.
 - The user confirmed that a Copilot agent stop successfully triggered a
   notification after the hook signal path was changed from the hook process's
   current working directory to the extension's global storage.
+- The user confirmed that the notification now works from the agent-stop hook
+  in their VS Code installation.
 - Automated checks cover hook signal creation and hook configuration
   installation/removal, but do not exercise a live Copilot session or prove
   that all Copilot stop attempts correspond to completed user-visible replies.

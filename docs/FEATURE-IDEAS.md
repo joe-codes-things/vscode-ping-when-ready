@@ -41,10 +41,14 @@ Assign the next available ID (`F001`, `F002`, ...). Include:
   as well as on the Mac running VS Code.
 - **Proposed behavior**: Run a user-configured macOS Shortcut that sends a
   generic completion message to one recipient.
-- **Trade-offs or open questions**: Compare Shortcuts with AppleScript/JXA and
-  available libraries. Validate setup, macOS Automation permissions,
-  persistence across app/system updates, iMessage-versus-SMS behavior, and
-  delivery/error reporting. Keep recipient details out of the repository and
-  default the feature off.
+- **Trade-offs or open questions**: Research favors a user-created Shortcut
+  over AppleScript/JXA or third-party libraries for this one-recipient case.
+  Validate setup, macOS Automation permissions, persistence across app/system
+  updates, iMessage-versus-SMS behavior, and delivery/error reporting. Keep
+  recipient details in the Shortcut (not the repository) and default the
+  feature off. The current general test-notification command may send a real
+  iMessage if the channel is enabled; add an explicit confirmation before
+  offering test sends.
 - **References**: Initial research is recorded in
-  [Project Onboarding](./ONBOARDING.md); refresh before implementation.
+  [Project Onboarding](./ONBOARDING.md); repeat a setup/send test before
+  enabling automatic delivery.

@@ -12,5 +12,9 @@ All notable changes to this project are documented here.
   the user confirmed that a Copilot stop now triggers a notification.
 - Added type-checking, hook configuration and signal tests, development-host
   launch configuration, and local VSIX packaging.
+- Refreshed iMessage feasibility research, including Shortcut limitations,
+  AppleScript permissions, library status, and explicit warnings that sending
+  a test notification can send a real message when iMessage is enabled.
+- Recorded the user's successful live Copilot stop-hook notification test.
 - WAV/MP3 playback with user-provided files and Shortcuts/iMessage delivery
   remain to be validated.
