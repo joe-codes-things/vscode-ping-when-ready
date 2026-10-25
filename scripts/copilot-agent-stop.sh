@@ -1,17 +1,31 @@
 #!/bin/sh
 
-if [ "$#" -ne 1 ]; then
-  printf '%s\n' "Expected the Ping When Ready signal-file path as the only argument." >&2
+if [ "$#" -lt 1 ]; then
+  printf '%s\n' "Expected a Ping When Ready hook mode." >&2
   printf '{}\n'
   exit 0
 fi
 
-signal_file="$1"
+hook_mode="$1"
+
+if [ "$hook_mode" = "session-start" ]; then
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"For Ping When Ready notifications, if your final response explicitly asks the user to answer a question or provide a decision, append this exact marker on its own final line: <!-- ping-when-ready:question -->. Do not use it for rhetorical or quoted questions, or when no reply is needed. If uncertain, omit it. The extension uses the marker only to label the notification; always provide your normal complete response."}}'
+  exit 0
+fi
+
+if [ "$hook_mode" != "agent-stop" ] || [ "$#" -ne 2 ]; then
+  printf '%s\n' "Invalid Ping When Ready hook arguments." >&2
+  printf '{}\n'
+  exit 0
+fi
+
+signal_file="$2"
 signal_directory="$(dirname "$signal_file")"
 temporary_file="${signal_file}.$$"
 
+umask 077
 if mkdir -p "$signal_directory" &&
-  printf '%s:%s\n' "$(date +%s)" "$$" > "$temporary_file" &&
+  cat > "$temporary_file" &&
   mv -f "$temporary_file" "$signal_file"; then
   :
 else

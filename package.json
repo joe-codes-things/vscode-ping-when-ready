@@ -40,12 +40,16 @@
         "title": "Ping When Ready: Disable Copilot Stop Hook"
       },
       {
-        "command": "pingWhenReady.sendTestNotification",
-        "title": "Ping When Ready: Send Test Notification"
+        "command": "pingWhenReady.sendTestIMessage",
+        "title": "Ping When Ready: Send Test iMessage"
       },
       {
-        "command": "pingWhenReady.testSignalBridge",
-        "title": "Ping When Ready: Test Signal Bridge"
+        "command": "pingWhenReady.setIMessageRecipient",
+        "title": "Ping When Ready: Set iMessage Recipient"
+      },
+      {
+        "command": "pingWhenReady.testAgentStopNotification",
+        "title": "Ping When Ready: Test Agent-Stop Notification"
       }
     ],
     "configuration": {
@@ -54,11 +58,13 @@
         "pingWhenReady.notifications.macOS": {
           "type": "boolean",
           "default": true,
-          "description": "Show a native macOS Notification Center banner when a Copilot agent finishes a turn."
+          "order": 1,
+          "description": "Show a native macOS Notification Center banner when a Copilot agent finishes a turn. Check this box to receive system notifications."
         },
         "pingWhenReady.notifications.sound": {
           "type": "boolean",
           "default": false,
+          "order": 2,
           "description": "Play the selected WAV or MP3 sound when a Copilot agent finishes a turn."
         },
         "pingWhenReady.soundFile": {
@@ -69,12 +75,8 @@
         "pingWhenReady.notifications.iMessage": {
           "type": "boolean",
           "default": false,
-          "description": "Run the configured macOS Shortcut when a Copilot agent finishes a turn. Configure the recipient and message in the Shortcut."
-        },
-        "pingWhenReady.iMessage.shortcutName": {
-          "type": "string",
-          "default": "Ping When Ready",
-          "description": "Name of the user-created macOS Shortcut that sends the iMessage."
+          "order": 3,
+          "description": "Send an iMessage through the macOS Messages app when a Copilot agent finishes a turn. Check this box to receive iMessages; set the recipient with the Ping When Ready: Set iMessage Recipient command."
         }
       }
     }

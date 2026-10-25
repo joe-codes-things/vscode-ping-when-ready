@@ -3,7 +3,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 const hookFileName = "ping-when-ready.json";
-const hookEventName = "agentStop";
 
 type HookCommand = {
   type: "command";
@@ -22,11 +21,11 @@ function hookConfigurationPath(): string {
   return path.join(copilotHome, "hooks", hookFileName);
 }
 
-function createHook(extensionPath: string, signalFilePath: string): HookCommand {
+function createHook(extensionPath: string, args: string[]): HookCommand {
   return {
     type: "command",
     exec: "/bin/sh",
-    args: [path.join(extensionPath, "scripts", "copilot-agent-stop.sh"), signalFilePath],
+    args: [path.join(extensionPath, "scripts", "copilot-agent-stop.sh"), ...args],
   };
 }
 
@@ -90,13 +89,23 @@ export async function installCopilotHook(
 ): Promise<string> {
   const filePath = hookConfigurationPath();
   const config = await readHookConfiguration(filePath);
-  const hook = createHook(extensionPath, signalFilePath);
-  const hooks = config.hooks[hookEventName] ?? [];
-
-  config.hooks[hookEventName] = [
-    ...hooks.filter((existing) => !isPingWhenReadyHook(existing)),
-    hook,
+  const hookEntries = [
+    {
+      event: "agentStop",
+      hook: createHook(extensionPath, ["agent-stop", signalFilePath]),
+    },
+    {
+      event: "sessionStart",
+      hook: createHook(extensionPath, ["session-start"]),
+    },
   ];
+  for (const { event, hook } of hookEntries) {
+    const hooks = config.hooks[event] ?? [];
+    config.hooks[event] = [
+      ...hooks.filter((existing) => !isPingWhenReadyHook(existing)),
+      hook,
+    ];
+  }
 
   await writeHookConfiguration(filePath, config);
   return filePath;
@@ -105,12 +114,13 @@ export async function installCopilotHook(
 export async function uninstallCopilotHook(): Promise<string> {
   const filePath = hookConfigurationPath();
   const config = await readHookConfiguration(filePath);
-  const hooks = config.hooks[hookEventName];
-
-  if (hooks) {
-    config.hooks[hookEventName] = hooks.filter((hook) => !isPingWhenReadyHook(hook));
-    if (config.hooks[hookEventName].length === 0) {
-      delete config.hooks[hookEventName];
+  for (const event of ["agentStop", "sessionStart"]) {
+    const hooks = config.hooks[event];
+    if (hooks) {
+      config.hooks[event] = hooks.filter((hook) => !isPingWhenReadyHook(hook));
+      if (config.hooks[event].length === 0) {
+        delete config.hooks[event];
+      }
     }
   }
 

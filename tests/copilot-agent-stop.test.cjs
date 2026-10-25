@@ -1,6 +1,8 @@
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
 const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const childProcess = require("node:child_process");
+const Module = require("node:module");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
@@ -8,31 +10,39 @@ const esbuild = require("esbuild");
 
 const hookScript = path.join(__dirname, "..", "scripts", "copilot-agent-stop.sh");
 const hookConfigModule = path.join(__dirname, "..", "src", "hookConfig.ts");
+const responseCategoryModule = path.join(__dirname, "..", "src", "responseCategory.ts");
 
-test("agent-stop hook writes a fresh signal and returns a no-op decision", (t) => {
+test("agent-stop hook preserves the event payload for transcript classification", (t) => {
   const workspace = mkdtempSync(path.join(os.tmpdir(), "ping-when-ready-"));
   t.after(() => rmSync(workspace, { recursive: true, force: true }));
 
   const signalPath = path.join(workspace, "agent-stop.signal");
-  const firstOutput = execFileSync("/bin/sh", [hookScript, signalPath], {
+  const transcriptPath = path.join(workspace, "transcript.jsonl");
+  const event = JSON.stringify({ hook_event_name: "agentStop", transcriptPath });
+  const firstOutput = execFileSync("/bin/sh", [hookScript, "agent-stop", signalPath], {
     cwd: workspace,
     encoding: "utf8",
-    input: '{"hook_event_name":"agentStop"}',
+    input: event,
   });
-  const firstSignal = readFileSync(signalPath, "utf8").trim();
+  const firstSignal = readFileSync(signalPath, "utf8");
 
-  const secondOutput = execFileSync("/bin/sh", [hookScript, signalPath], {
+  const secondOutput = execFileSync("/bin/sh", [hookScript, "agent-stop", signalPath], {
     cwd: workspace,
     encoding: "utf8",
-    input: '{"hook_event_name":"agentStop"}',
+    input: event,
   });
-  const secondSignal = readFileSync(signalPath, "utf8").trim();
 
   assert.equal(firstOutput.trim(), "{}");
   assert.equal(secondOutput.trim(), "{}");
-  assert.match(firstSignal, /^\d+:\d+$/);
-  assert.match(secondSignal, /^\d+:\d+$/);
-  assert.notEqual(firstSignal, secondSignal);
+  assert.equal(firstSignal, event);
+});
+
+test("session-start hook adds the question-marker instruction to agent context", () => {
+  const output = execFileSync("/bin/sh", [hookScript, "session-start"], { encoding: "utf8" });
+  const result = JSON.parse(output);
+  assert.equal(result.hookSpecificOutput.hookEventName, "SessionStart");
+  assert.match(result.hookSpecificOutput.additionalContext, /<!-- ping-when-ready:question -->/);
+  assert.match(result.hookSpecificOutput.additionalContext, /If uncertain, omit it/);
 });
 
 test("hook installation preserves other user hooks and can be removed", async (t) => {
@@ -76,9 +86,16 @@ test("hook installation preserves other user hooks and can be removed", async (t
   assert.deepEqual(installed.hooks.agentStop[1], {
     type: "command",
     exec: "/bin/sh",
-    args: [path.join(extensionPath, "scripts", "copilot-agent-stop.sh"), signalFilePath],
+    args: [path.join(extensionPath, "scripts", "copilot-agent-stop.sh"), "agent-stop", signalFilePath],
   });
-  assert.deepEqual(installed.hooks.sessionStart, [unrelatedHook]);
+  assert.deepEqual(installed.hooks.sessionStart, [
+    unrelatedHook,
+    {
+      type: "command",
+      exec: "/bin/sh",
+      args: [path.join(extensionPath, "scripts", "copilot-agent-stop.sh"), "session-start"],
+    },
+  ]);
 
   await uninstallCopilotHook();
   const uninstalled = JSON.parse(readFileSync(configPath, "utf8"));
@@ -86,4 +103,178 @@ test("hook installation preserves other user hooks and can be removed", async (t
     agentStop: [unrelatedHook],
     sessionStart: [unrelatedHook],
   });
+});
+
+test("question marker classification uses only the final assistant message", async (t) => {
+  const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), "ping-when-ready-transcript-"));
+  t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
+
+  const modulePath = path.join(temporaryRoot, "responseCategory.cjs");
+  esbuild.buildSync({
+    entryPoints: [responseCategoryModule],
+    outfile: modulePath,
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+  });
+  const { finalAssistantResponseHasQuestionMarker } = require(modulePath);
+  const transcriptPath = path.join(temporaryRoot, "session.jsonl");
+  const entry = (type, content) => JSON.stringify({ type, data: { content } });
+
+  writeFileSync(transcriptPath, [
+    entry("assistant.message", "Do you prefer option A? <!-- ping-when-ready:question -->"),
+    entry("user.message", "The marker from an old response may appear in transcript history."),
+    entry("assistant.message", "Agent response ready for review."),
+  ].join("\n"));
+  assert.equal(await finalAssistantResponseHasQuestionMarker(transcriptPath), false);
+
+  writeFileSync(transcriptPath, [
+    entry("assistant.message", "The answer is ready."),
+    entry("assistant.message", "Should I proceed? <!-- ping-when-ready:question -->"),
+    entry("assistant.turn_end", ""),
+  ].join("\n"));
+  assert.equal(await finalAssistantResponseHasQuestionMarker(transcriptPath), true);
+
+  writeFileSync(transcriptPath, entry(
+    "assistant.message",
+    "This explains the marker <!-- ping-when-ready:question --> but is not marked as a question.",
+  ));
+  assert.equal(await finalAssistantResponseHasQuestionMarker(transcriptPath), false);
+});
+
+test("iMessage recipient is stored securely and send test commands require confirmation", async (t) => {
+  const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), "ping-when-ready-extension-"));
+  t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
+
+  const extensionBundle = path.join(temporaryRoot, "extension.cjs");
+  esbuild.buildSync({
+    entryPoints: [path.join(__dirname, "..", "src", "extension.ts")],
+    outfile: extensionBundle,
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    external: ["vscode"],
+  });
+
+  const registeredCommands = new Map();
+  const outputLines = [];
+  const secretStorage = new Map();
+  const recipient = "+14155550123";
+  const scriptCalls = [];
+  let signalCreated;
+  let confirmationResponse;
+  const settings = {
+    "pingWhenReady.notifications.macOS": false,
+    "pingWhenReady.notifications.sound": false,
+    "pingWhenReady.notifications.iMessage": true,
+  };
+  const vscodeMock = {
+    window: {
+      createOutputChannel: () => ({ appendLine: (line) => outputLines.push(line), dispose() {} }),
+      showErrorMessage() {},
+      showInformationMessage() {},
+      showWarningMessage: async (message) => {
+        warningMessages.push(message);
+        return confirmationResponse;
+      },
+      showInputBox: async () => recipient,
+    },
+    workspace: {
+      getConfiguration: () => ({
+        get: (key, fallback) => settings[`pingWhenReady.${key}`] ?? fallback,
+      }),
+      createFileSystemWatcher: () => ({
+        onDidCreate: (listener) => { signalCreated = listener; },
+        onDidChange() {},
+        dispose() {},
+      }),
+    },
+    RelativePattern: class {},
+    SecretStorage: class {},
+    commands: {
+      registerCommand: (name, handler) => {
+        registeredCommands.set(name, handler);
+        return { dispose() {} };
+      },
+    },
+  };
+  const warningMessages = [];
+  const originalLoad = Module._load;
+  const originalExecFile = childProcess.execFile;
+  childProcess.execFile = (file, args, options, callback) => {
+    scriptCalls.push({ file, args, options });
+    callback(null, "", "");
+    return {};
+  };
+  Module._load = function (request, parent, isMain) {
+    return request === "vscode" ? vscodeMock : originalLoad.call(this, request, parent, isMain);
+  };
+
+  try {
+    const extension = require(extensionBundle);
+    await extension.activate({
+      extensionPath: temporaryRoot,
+      globalStorageUri: { fsPath: path.join(temporaryRoot, "storage") },
+      subscriptions: [],
+      secrets: {
+        get: async (key) => secretStorage.get(key),
+        store: async (key, value) => secretStorage.set(key, value),
+      },
+    });
+  } finally {
+    Module._load = originalLoad;
+    childProcess.execFile = originalExecFile;
+  }
+
+  await registeredCommands.get("pingWhenReady.setIMessageRecipient")();
+  assert.equal(secretStorage.get("pingWhenReady.iMessageRecipient"), recipient);
+
+  await registeredCommands.get("pingWhenReady.sendTestIMessage")();
+  assert.equal(scriptCalls.length, 0);
+
+  confirmationResponse = "Send Test iMessage";
+  await registeredCommands.get("pingWhenReady.sendTestIMessage")();
+  assert.equal(scriptCalls.length, 1);
+  assert.equal(scriptCalls[0].file, "/usr/bin/osascript");
+  assert.equal(scriptCalls[0].args[0], "-e");
+  assert.match(scriptCalls[0].args[1], /whose service type is iMessage/);
+  assert.deepEqual(scriptCalls[0].args.slice(2), [recipient, "Ping When Ready test message."]);
+  assert.equal(scriptCalls[0].options.timeout, 30_000);
+  assert.equal(outputLines.some((line) => line.includes(recipient)), false);
+
+  confirmationResponse = undefined;
+  await registeredCommands.get("pingWhenReady.testAgentStopNotification")();
+  assert.equal(scriptCalls.length, 1);
+
+  confirmationResponse = "Run Agent-Stop Test";
+  await registeredCommands.get("pingWhenReady.testAgentStopNotification")();
+  assert.equal(scriptCalls.length, 2);
+  assert.deepEqual(scriptCalls[1].args.slice(2), [recipient, "Agent response ready for review."]);
+  assert.match(warningMessages.at(-1), /sends a real iMessage/);
+
+  const transcriptPath = path.join(temporaryRoot, "session.jsonl");
+  writeFileSync(transcriptPath, JSON.stringify({
+    type: "assistant.message",
+    data: { content: `Could you answer this? ${"<!-- ping-when-ready:question -->"}` },
+  }));
+  const signalPath = path.join(temporaryRoot, "storage", "agent-stop.signal");
+  writeFileSync(signalPath, JSON.stringify({ transcriptPath }));
+  await signalCreated({ fsPath: signalPath });
+  for (let attempt = 0; attempt < 100 && scriptCalls.length < 3; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(scriptCalls.length, 3, outputLines.join("\n"));
+  assert.deepEqual(scriptCalls[2].args.slice(2), [recipient, "Question from agent pending."]);
+
+  writeFileSync(transcriptPath, JSON.stringify({
+    type: "assistant.message",
+    data: { content: "The task is complete." },
+  }));
+  writeFileSync(signalPath, JSON.stringify({ transcriptPath, timestamp: "later" }));
+  await signalCreated({ fsPath: signalPath });
+  for (let attempt = 0; attempt < 100 && scriptCalls.length < 4; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(scriptCalls.length, 4, outputLines.join("\n"));
+  assert.deepEqual(scriptCalls[3].args.slice(2), [recipient, "Agent response ready for review."]);
 });

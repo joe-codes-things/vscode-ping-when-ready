@@ -5,19 +5,23 @@
 This repository contains a personal, macOS-focused VS Code extension for
 notifying the user when a GitHub Copilot agent finishes a turn. It uses
 Copilot's `agentStop` hook and supports a native macOS notification, optional
-sound, and an optional macOS Shortcut for iMessage. The extension is an early
-prototype; `agentStop` has been confirmed to trigger a notification in the
-user's VS Code installation, but broader reliability and optional channels
-still need validation.
+sound, and optional AppleScript automation of Messages for iMessage. The
+extension is an early prototype; `agentStop` has been confirmed to trigger a
+notification in the user's VS Code installation, but broader reliability and
+optional channels still need validation.
 
 ## Architecture at a glance
 
 - `src/extension.ts` implements the VS Code extension and notification
   channels.
-- `src/hookConfig.ts` installs/removes the user-level Copilot hook while
+- `src/hookConfig.ts` installs/removes the user-level Copilot hooks while
   preserving other configured hooks.
-- `scripts/copilot-agent-stop.sh` writes a unique signal to VS Code extension
-  global storage. The extension watches this path to receive hook events.
+- `scripts/copilot-agent-stop.sh` injects the question-marker direction at
+  session start and writes the agent-stop event payload to extension global
+  storage.
+- `src/responseCategory.ts` inspects the final assistant transcript entry for
+  the marker; unknown or unreadable transcripts fall back to the completion
+  notification.
 - `package.json`, `tsconfig.json`, and `.vscode/` configure compilation,
   type-checking, tests, packaging, and launching the Extension Development
   Host.
@@ -32,9 +36,8 @@ still need validation.
 ## Getting familiar with the project
 
 Start with `README.md` for setup. Press F5 to open the Extension Development
-Host; enable the hook there and start a new Copilot-targeted session. The
-**Test Signal Bridge** command checks the file handoff separately from
-Copilot's hook event.
+Host; enable or update the hooks there and start a new Copilot-targeted
+session.
 
 ## Development and research environment
 
@@ -44,12 +47,25 @@ and the VS Code Extension API. It is currently macOS-only. Run
 
 ## Initial development direction
 
-The implementation uses a user-level Copilot `agentStop` command hook and an
-extension-global-storage signal file. In the user's VS Code installation, the
-Copilot stop hook successfully triggered a notification after the initial
-working-directory handoff was corrected to use extension global storage.
-Continue validating timing and duplicate behavior in normal sessions because
-VS Code documents hooks as a Preview feature.
+The implementation uses user-level Copilot `sessionStart` and `agentStop`
+command hooks plus an extension-global-storage signal file. At session start,
+the first hook adds a best-effort instruction to mark final assistant
+responses that explicitly ask the user to answer or decide. At agent stop, the
+second hook writes the event payload, including the transcript path. The
+extension reads the last `assistant.message` entry and selects one of two
+fixed notification messages based on the marker. Missing markers or unreadable
+transcripts fall back to the normal completion notification, so the hook still
+notifies regardless of classification.
+
+In the user's VS Code installation, normal agent-response iMessage delivery
+was confirmed, but a question prompt failed to produce any notification.
+Question-category detection is therefore not yet verified end-to-end. Re-run
+**Enable Copilot Stop Hook** after installing this update so the session-start
+marker instruction is added to the existing user hook configuration.
+Investigate whether the hook fires, the agent follows the instruction, and the
+transcript parser sees the final marker. Continue validating timing and
+duplicate behavior because VS Code documents hooks as a Preview feature, and
+the transcript format is an implementation detail. See [B001](./BUGS.md#b001--question-prompt-does-not-trigger-a-notification).
 
 ## Research findings (2026-10-24)
 
@@ -84,8 +100,31 @@ treating it as reliable.
 
 The hook uses a unique signal in extension global storage rather than the
 Copilot hook process's working directory. This avoids requiring the extension
-and hook to share a workspace and supports workspaces whose files are not
-directly involved. The signal contains no chat text or personal data.
+and hook to share a workspace. The signal file carries the hook's JSON event
+payload, including a local transcript path, but does not copy transcript
+contents. The extension reads the final assistant message locally only to
+check for the marker; it does not send chat content in notifications.
+
+#### Response category marker
+
+The `agentStop` hook runs after the agent's turn and supplies a transcript path,
+not the final response text. The extension reads the VS Code Copilot JSONL
+transcript and checks only the most recent `assistant.message` content for
+`<!-- ping-when-ready:question -->`. It does not classify by punctuation.
+The marker is requested through `sessionStart` hook `additionalContext` and
+should be appended as a hidden HTML-comment line only when the final response
+explicitly asks the user for an answer or decision. It should not be used for
+rhetorical or quoted questions.
+
+If the agent omits the marker, transcript reading fails, or transcript entries
+change in a future VS Code version, the extension is designed to send the ordinary
+**“Agent response ready for review.”** message. Marker recognition changes
+only the label to **“Question from agent pending.”**; it never suppresses the
+agent-stop notification. However, the user observed no notification at all for
+a question prompt while normal responses worked. This behavior has not yet been
+reproduced or diagnosed; see [B001](./BUGS.md#b001--question-prompt-does-not-trigger-a-notification).
+Since hooks and transcript structure are preview or implementation details,
+validate both types with live Copilot responses.
 
 ### Visual notification
 
@@ -109,11 +148,15 @@ message as a separate channel.
 ### Settings and notification channels
 
 Preferences are contributed through `contributes.configuration`. Separate
-boolean settings allow channels to be enabled together. The native macOS
-banner is enabled by default; sound and iMessage are disabled by default.
+boolean settings appear as checkboxes in VS Code Settings, and channels can be
+enabled together. Search **Ping When Ready** in Settings. Check
+**Notifications: macOS** for system banners, **Notifications: iMessage** for
+Messages alerts, or both. The native macOS banner is enabled by default;
+sound and iMessage are disabled by default.
 Sound currently uses an absolute path to a local WAV or MP3 file; the user
-plans to provide candidate sounds later. iMessage uses a configurable
-Shortcut name.
+plans to provide candidate sounds later. iMessage recipient setup uses VS Code
+SecretStorage. Separate commands test iMessage directly and simulate the full
+agent-stop notification pipeline.
 
 ### Sound playback
 
@@ -132,50 +175,56 @@ any sound assets supplied or packaged.
 
 ### Optional iMessage notification
 
-VS Code has no iMessage API. The current optional integration invokes a
-user-created macOS Shortcut by name through Apple's `shortcuts` command-line
-tool. The user must configure its Send Message action and recipient in
-Shortcuts; the extension does not store the phone number. This remains
-unvalidated and is disabled by default.
+VS Code has no iMessage API. The current prototype invokes `/usr/bin/osascript`
+to automate the macOS Messages app with AppleScript. It selects an iMessage
+service, addresses the configured buddy, and sends a generic completion
+message; it does not include the agent's response text. The user sets the
+recipient with **Ping When Ready: Set iMessage Recipient**. The number is
+stored in VS Code SecretStorage, not in settings, hook arguments, logs, or
+repository files. SecretStorage persists across VS Code restarts in the same
+profile, so the number only needs to be entered once per profile. The feature
+is disabled by default.
 
-Keep this channel opt-in and off by default, and send a generic completion
-notice rather than chat contents. Never use undocumented Messages databases
-or try to bypass macOS consent. A gitignored text file is only protected from
-accidental Git commits; it is not encrypted. The current design keeps the
-recipient in the user's Shortcut so the extension never stores it.
+The dedicated **Ping When Ready: Send Test iMessage** command requires modal
+confirmation before sending a separate test message. A successful AppleScript
+command only means the request was accepted by Messages; verify actual
+delivery and route in Messages before enabling automatic sends. macOS may ask
+for permission for VS Code to control Messages; grant or revoke that under
+System Settings > Privacy & Security > Automation.
+
+**Ping When Ready: Test Agent-Stop Notification** simulates the normal
+agent-stop notification pipeline and runs the channels currently enabled in
+settings. It requires confirmation when iMessage is enabled because it sends
+another real message.
+
+Never use undocumented Messages databases or try to bypass macOS consent.
+The test send has a 30-second timeout. Error output must not include the
+recipient or message body.
 
 #### Feasibility refresh (2026-10-25)
 
-For a single recipient and fixed completion message, a user-created Shortcut
-remains the simplest first implementation to validate. Apple documents
-running a named Shortcut using `shortcuts run <name>` and says that a
-successful run exits with code 0 and an error exits with code 1. Shortcuts
-that ask for input or show alerts can pause the command-line run, so configure
-the fixed recipient and generic message inside the Shortcut and avoid
-interactive actions. A successful exit confirms Shortcut execution, not
-delivery to the recipient.
+The implementation initially explored Shortcuts, but the user preferred
+direct AppleScript automation and the prototype now uses the Messages app's
+scripting support. No shortcut creation or Shortcuts command-line setup is
+needed.
 
 A phone number does not guarantee iMessage routing. The Mac's Messages
 configuration and recipient availability determine whether the message uses
 iMessage or another Messages route, including SMS/MMS/RCS when configured.
-Before enabling automatic sends, manually run the Shortcut and verify the
-resulting conversation and message route in Messages.
+Before enabling automatic sends, run the confirmed test command and verify
+the resulting conversation and message route in Messages.
 
-AppleScript/JXA can automate Messages on this Mac, and the installed Messages
-application includes a scripting dictionary. However, that dictionary is not
-a documented, stable public send API for third-party extensions, and macOS
-Automation consent applies. The exact app identity macOS will show for
-extension-launched automation should be tested on the installed VS Code
-build. Automation grants can be reviewed or revoked in System Settings;
-permission persistence across OS or VS Code identity/signature changes is not
-guaranteed.
+AppleScript automation depends on the Messages app scripting interface and
+macOS Automation consent; it is not a general supported iMessage API.
+The exact app identity macOS shows as the automation requester and permission
+persistence across OS or VS Code identity/signature changes must be verified
+on the installed build.
 
 No first-party Apple API was found for an unrelated VS Code extension to send
 arbitrary iMessages. Apple's Messages framework is for extensions that run
 inside Messages conversations, not a general desktop sender.
 
-Existing Node packages do not improve on the Shortcut approach for this
-prototype:
+Third-party Node packages remain unnecessary for this prototype:
 
 - [`osa-imessage`](https://github.com/wtfaremyinitials/osa-imessage) advertises
   AppleScript-backed sending, but the npm release is version 2.4.2 and its
@@ -193,23 +242,18 @@ prototype:
 
 #### Recommendation and safeguards
 
-Retain the current Shortcut approach, with the recipient and fixed text stored
-in the user's Shortcut rather than source code, settings, hook arguments, or
-logs. `.gitignore` is not secure storage; VS Code `SecretStorage` would be
-appropriate only if the extension itself must retain the recipient. The
-extension currently stores only the Shortcut's name and invokes
-`/usr/bin/shortcuts` using Node's `execFile` with separate arguments, avoiding
-shell interpolation.
+Use the current AppleScript approach only after a user-triggered test. The
+recipient is saved in VS Code SecretStorage. AppleScript source is passed to
+`osascript` with `execFile`, while recipient and message are separate
+arguments; avoid shell interpolation and never log either value.
 
 Keep iMessage disabled by default and clearly explain that enabling it sends
-a real message. Currently, **Send Test Notification** also runs the configured
-Shortcut when the iMessage setting is enabled; it can send a real message and
-must not be treated as a harmless local test. Test the Shortcut manually
-first. Before adding an explicit test-send action, show a confirmation that
-clearly states it sends an actual message. Add a timeout for shortcuts that
-pause awaiting input, report command/permission errors without logging the
-recipient or message body, and never describe exit code 0 as proof of message
-delivery. Verify delivery and routing manually in Messages.
+a real message. **Send Test iMessage** and **Test Agent-Stop Notification**
+are distinct actions with modal confirmation before any real iMessage send.
+Report command/permission errors without
+logging the recipient or message body, and never describe a successful
+AppleScript execution as proof of message delivery. Verify delivery and
+routing manually in Messages.
 
 macOS Automation permissions can be reviewed and revoked in System Settings.
 Apple's public docs do not promise that permission will persist indefinitely
@@ -254,13 +298,15 @@ the automation requester on the installed VS Code build.
 
 ### Local validation
 
-- The user confirmed that **Send Test Notification** displayed a native
-  notification on their Mac.
 - The user confirmed that a Copilot agent stop successfully triggered a
   notification after the hook signal path was changed from the hook process's
   current working directory to the extension's global storage.
 - The user confirmed that the notification now works from the agent-stop hook
   in their VS Code installation.
+- The user confirmed normal agent-response iMessage delivery, but reported
+  that no notification fired for a question prompt. Question-marker
+  classification has not been validated end-to-end; see
+  [B001](./BUGS.md#b001--question-prompt-does-not-trigger-a-notification).
 - Automated checks cover hook signal creation and hook configuration
   installation/removal, but do not exercise a live Copilot session or prove
   that all Copilot stop attempts correspond to completed user-visible replies.

@@ -4,13 +4,27 @@ import * as path from "node:path";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
 import { installCopilotHook, uninstallCopilotHook } from "./hookConfig";
+import { finalAssistantResponseHasQuestionMarker } from "./responseCategory";
 
 const execFile = promisify(childProcess.execFile);
 const output = vscode.window.createOutputChannel("Ping When Ready");
 const lastSignalByPath = new Map<string, string>();
 const activeSounds = new Set<childProcess.ChildProcess>();
-const signalWaiters = new Set<() => void>();
 const signalFileName = "agent-stop.signal";
+const iMessageRecipientKey = "pingWhenReady.iMessageRecipient";
+const completionNotification = "Agent response ready for review.";
+const questionNotification = "Question from agent pending.";
+const iMessageScript = [
+  "on run argv",
+  "set recipientNumber to item 1 of argv",
+  "set messageText to item 2 of argv",
+  "tell application \"Messages\"",
+  "set targetService to first service whose service type is iMessage",
+  "set targetBuddy to buddy recipientNumber of targetService",
+  "send messageText to targetBuddy",
+  "end tell",
+  "end run",
+].join("\n");
 
 function setting<T>(key: string, fallback: T): T {
   return vscode.workspace.getConfiguration("pingWhenReady").get<T>(key, fallback);
@@ -22,7 +36,7 @@ function logError(message: string, error: unknown): void {
   void vscode.window.showErrorMessage(`Ping When Ready: ${message}. See Output > Ping When Ready for details.`);
 }
 
-async function showNativeNotification(): Promise<void> {
+async function showNativeNotification(message: string): Promise<void> {
   await execFile("/usr/bin/osascript", [
     "-e",
     "on run argv",
@@ -30,7 +44,7 @@ async function showNativeNotification(): Promise<void> {
     "display notification (item 1 of argv) with title (item 2 of argv)",
     "-e",
     "end run",
-    "The agent has finished responding.",
+    message,
     "Ping When Ready",
   ]);
 }
@@ -59,24 +73,33 @@ async function playSound(): Promise<void> {
   });
 }
 
-async function runShortcut(): Promise<void> {
-  const name = setting<string>("iMessage.shortcutName", "Ping When Ready").trim();
-  if (!name) {
-    throw new Error("Set the name of the macOS Shortcut that sends the iMessage.");
+async function sendIMessage(context: vscode.ExtensionContext, message: string): Promise<void> {
+  const recipient = await context.secrets.get(iMessageRecipientKey);
+  if (!recipient) {
+    throw new Error("Configure the iMessage recipient with Ping When Ready: Set iMessage Recipient before enabling iMessage.");
   }
-  await execFile("/usr/bin/shortcuts", ["run", name]);
+  try {
+    await execFile("/usr/bin/osascript", ["-e", iMessageScript, recipient, message], { timeout: 30_000 });
+  } catch {
+    throw new Error("Messages automation failed. Check that Messages is signed in and allow automation access in macOS System Settings.");
+  }
+  output.appendLine("Messages accepted the iMessage send request; delivery is not confirmed.");
 }
 
-async function notify(): Promise<void> {
+async function notify(
+  context: vscode.ExtensionContext,
+  message = completionNotification,
+  includeIMessage = true,
+): Promise<void> {
   const work: Promise<void>[] = [];
   if (setting<boolean>("notifications.macOS", true)) {
-    work.push(showNativeNotification());
+    work.push(showNativeNotification(message));
   }
   if (setting<boolean>("notifications.sound", false)) {
     work.push(playSound());
   }
-  if (setting<boolean>("notifications.iMessage", false)) {
-    work.push(runShortcut());
+  if (includeIMessage && setting<boolean>("notifications.iMessage", false)) {
+    work.push(sendIMessage(context, message));
   }
   const results = await Promise.allSettled(work);
   for (const result of results) {
@@ -98,33 +121,41 @@ function watchSignalFile(context: vscode.ExtensionContext): void {
       }
       lastSignalByPath.set(uri.fsPath, signal);
       output.appendLine(`Received Copilot agent-stop signal at ${new Date().toISOString()}.`);
-      for (const waiter of [...signalWaiters]) {
-        waiter();
+      let message = completionNotification;
+      try {
+        const event: unknown = JSON.parse(signal);
+        const transcriptPath = getTranscriptPath(event);
+        if (!transcriptPath) {
+          throw new Error("The Copilot stop-hook event did not include a transcript path.");
+        }
+        if (await finalAssistantResponseHasQuestionMarker(transcriptPath)) {
+          message = questionNotification;
+        }
+      } catch (error) {
+        output.appendLine(`Could not classify the agent response; using the completion notification. ${error instanceof Error ? error.message : String(error)}`);
       }
-      await notify();
+      await notify(context, message);
     } catch (error) {
       logError("Could not process the Copilot agent-stop signal", error);
+    }
+
+    function getTranscriptPath(event: unknown): string | undefined {
+      if (typeof event !== "object" || event === null) {
+        return undefined;
+      }
+      if ("transcriptPath" in event && typeof event.transcriptPath === "string") {
+        return event.transcriptPath;
+      }
+      if ("transcript_path" in event && typeof event.transcript_path === "string") {
+        return event.transcript_path;
+      }
+      return undefined;
     }
   };
 
   watcher.onDidCreate((uri) => void handleSignal(uri));
   watcher.onDidChange((uri) => void handleSignal(uri));
   context.subscriptions.push(watcher);
-}
-
-function waitForSignal(timeoutMs: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const waiter = (): void => {
-      clearTimeout(timeout);
-      signalWaiters.delete(waiter);
-      resolve();
-    };
-    const timeout = setTimeout(() => {
-      signalWaiters.delete(waiter);
-      reject(new Error("The extension did not receive the test signal. Check the Ping When Ready output channel."));
-    }, timeoutMs);
-    signalWaiters.add(waiter);
-  });
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -150,23 +181,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         logError("Could not enable the Copilot agent-stop hook", error);
       }
     }),
-    vscode.commands.registerCommand("pingWhenReady.testSignalBridge", async () => {
-      try {
-        const signalFilePath = path.join(context.globalStorageUri.fsPath, signalFileName);
-        const receivedSignal = waitForSignal(3000);
-        await Promise.all([
-          execFile("/bin/sh", [
-            path.join(context.extensionPath, "scripts", "copilot-agent-stop.sh"),
-            signalFilePath,
-          ]),
-          receivedSignal,
-        ]);
-        output.appendLine("The extension received its test signal. Copilot's agentStop event was not tested.");
-        vscode.window.showInformationMessage("Signal bridge passed; the extension received the test signal. Copilot's agentStop event was not tested.");
-      } catch (error) {
-        logError("Could not run the signal bridge test", error);
-      }
-    }),
     vscode.commands.registerCommand("pingWhenReady.disableCopilotHook", async () => {
       try {
         const filePath = await uninstallCopilotHook();
@@ -175,8 +189,50 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         logError("Could not disable the Copilot agent-stop hook", error);
       }
     }),
-    vscode.commands.registerCommand("pingWhenReady.sendTestNotification", async () => {
-      await notify();
+    vscode.commands.registerCommand("pingWhenReady.setIMessageRecipient", async () => {
+      const recipient = await vscode.window.showInputBox({
+        prompt: "Enter the iMessage recipient in international format (for example, +14155550123). Stored securely in VS Code SecretStorage.",
+        placeHolder: "+14155550123",
+        ignoreFocusOut: true,
+        validateInput: (value) => /^\+[1-9]\d{7,14}$/.test(value.trim())
+          ? undefined
+          : "Enter a phone number in international format, starting with + and containing 8–15 digits.",
+      });
+      if (recipient === undefined) {
+        return;
+      }
+      await context.secrets.store(iMessageRecipientKey, recipient.trim());
+      vscode.window.showInformationMessage("The iMessage recipient was saved securely in VS Code SecretStorage.");
+    }),
+    vscode.commands.registerCommand("pingWhenReady.sendTestIMessage", async () => {
+      const confirmation = await vscode.window.showWarningMessage(
+        "This sends a real iMessage to the recipient saved in VS Code SecretStorage. Continue?",
+        { modal: true },
+        "Send Test iMessage",
+      );
+      if (confirmation !== "Send Test iMessage") {
+        return;
+      }
+      try {
+        await sendIMessage(context, "Ping When Ready test message.");
+        vscode.window.showInformationMessage("Messages accepted the test send request. Check Messages to verify delivery.");
+      } catch (error) {
+        logError("Could not send the test iMessage", error);
+      }
+    }),
+    vscode.commands.registerCommand("pingWhenReady.testAgentStopNotification", async () => {
+      const includesIMessage = setting<boolean>("notifications.iMessage", false);
+      const confirmation = await vscode.window.showWarningMessage(
+        includesIMessage
+          ? "This simulates an agent-stop notification using your enabled channels and sends a real iMessage. Continue?"
+          : "This simulates an agent-stop notification using your currently enabled channels. iMessage is disabled in settings. Continue?",
+        { modal: true },
+        "Run Agent-Stop Test",
+      );
+      if (confirmation !== "Run Agent-Stop Test") {
+        return;
+      }
+      await notify(context);
     }),
   );
 }
