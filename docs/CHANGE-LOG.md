@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## 0.2.3 - 2026-10-27
+
+- Added unique IDs to hook signals and an atomic shared-storage claim so
+  multiple VS Code windows process each Copilot event only once.
+- Added a two-extension-host regression test confirming a shared event sends
+  one sound and one iMessage while later distinct events still notify.
+- User testing with response sound enabled and an interactive question prompt
+  confirmed the 0.2.3 notification flow works with multiple VS Code windows.
+
 ## 0.2.2 - 2026-10-27
 
 - Added native file-picker commands to choose separate WAV or MP3 sounds for

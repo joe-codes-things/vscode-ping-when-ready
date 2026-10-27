@@ -66,6 +66,28 @@ session. In a regular VS Code window, use the Ping When Ready icon in the
 Activity Bar to toggle notification channels without searching the full
 Settings UI; the view's gear opens the filtered extension settings.
 
+## Audio playback investigation
+
+For the reported sound-doubling/distortion issue, follow the project-wide
+instructions in `AGENTS.md` and the current evidence in
+[B002](./BUGS.md#b002--notification-sound-appears-doubled-and-distorted-during-playback).
+The user is a professional music producer and has already checked the exported
+sounds in a DAW, where the reported artifact was not present. Treat the
+extension-playback report as credible; investigate event duplication,
+concurrent playback processes, and the macOS output path. Do not presume a
+mixing, clipping, export, or user-error problem, or ask the user to repeat
+audio-quality checks they have already performed.
+
+Hook signals now carry unique IDs and are claimed through exclusive file
+creation in extension global storage, which is shared by extension hosts in
+the same VS Code profile. This is intended to make only one window handle a
+given Copilot event, including its sound, banner, and iMessage channels.
+Automated tests cover two extension-host instances and confirm one sound and
+one iMessage for a shared event; live testing with multiple user windows is
+confirmed for response sound and an interactive question prompt. The user
+reported that the 0.2.3 test worked. The live test did not separately verify
+iMessage; its one-send behavior remains covered by the automated test.
+
 ## Development and research environment
 
 The extension uses TypeScript, Node.js in the local/UI extension host, esbuild,

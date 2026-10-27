@@ -4,8 +4,9 @@ A personal macOS VS Code extension that uses Copilot hooks to trigger a native
 macOS notification, optional sound, and optional iMessage when an agent finishes
 a response or asks the user for input. The `ask_user` prompt notification and
 follow-up completion notification have been confirmed in a live Extension
-Development Host session. Copilot hooks are in Preview, so broader timing and
-duplicate behavior still need validation.
+Development Host session. Version 0.2.3's cross-window response-sound and
+interactive-question notification behavior has also been confirmed in live
+testing. Copilot hooks are in Preview, so behavior may vary across updates.
 
 ## Development
 
@@ -43,6 +44,9 @@ The extension uses the red notification-bell artwork supplied in
 extension icon. `resources/icon.png` is the VS Code extension-list icon, and
 `resources/ping.svg` is the matching Activity Bar icon. The source archive is
 kept in the repository but excluded from the packaged VSIX.
+When the same Copilot hook signal is visible in multiple VS Code windows, a
+shared atomic claim ensures notification channels run only once for that
+signal.
 
 For an agent response that explicitly needs your answer or decision, the
 extension asks the agent to append a hidden `<!-- ping-when-ready:question -->`

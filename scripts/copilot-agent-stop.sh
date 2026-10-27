@@ -24,11 +24,16 @@ if [ "$hook_mode" = "question-prompt" ]; then
   signal_directory="$(dirname "$signal_file")"
   temporary_file="${signal_file}.$$"
   signal_timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')-$$"
+  signal_id="$(/usr/bin/uuidgen)" || {
+    printf '%s\n' "Ping When Ready could not generate a unique question-prompt signal ID." >&2
+    printf '{}\n'
+    exit 0
+  }
 
   umask 077
   if mkdir -p "$signal_directory" &&
     {
-      printf '{"hookEventName":"pingWhenReadyQuestionPrompt","timestamp":"%s","event":' "$signal_timestamp"
+      printf '{"hookEventName":"pingWhenReadyQuestionPrompt","signalId":"%s","timestamp":"%s","event":' "$signal_id" "$signal_timestamp"
       cat
       printf '}\n'
     } > "$temporary_file" &&
@@ -52,10 +57,19 @@ fi
 signal_file="$2"
 signal_directory="$(dirname "$signal_file")"
 temporary_file="${signal_file}.$$"
+signal_id="$(/usr/bin/uuidgen)" || {
+  printf '%s\n' "Ping When Ready could not generate a unique agent-stop signal ID." >&2
+  printf '{}\n'
+  exit 0
+}
 
 umask 077
 if mkdir -p "$signal_directory" &&
-  cat > "$temporary_file" &&
+  {
+    printf '{"hookEventName":"pingWhenReadyAgentStop","signalId":"%s","event":' "$signal_id"
+    cat
+    printf '}\n'
+  } > "$temporary_file" &&
   mv -f "$temporary_file" "$signal_file"; then
   :
 else

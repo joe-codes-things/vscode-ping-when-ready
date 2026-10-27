@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
 const { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } = require("node:fs");
 const childProcess = require("node:child_process");
+const { EventEmitter } = require("node:events");
 const Module = require("node:module");
 const os = require("node:os");
 const path = require("node:path");
@@ -25,17 +26,21 @@ test("agent-stop hook preserves the event payload for transcript classification"
     input: event,
   });
   const firstSignal = readFileSync(signalPath, "utf8");
-  assert.equal(firstSignal, event);
+  const parsedFirstSignal = JSON.parse(firstSignal);
+  assert.equal(parsedFirstSignal.hookEventName, "pingWhenReadyAgentStop");
+  assert.equal(parsedFirstSignal.event.transcriptPath, transcriptPath);
 
   const secondOutput = execFileSync("/bin/sh", [hookScript, "agent-stop", signalPath], {
     cwd: workspace,
     encoding: "utf8",
     input: event,
   });
+  const parsedSecondSignal = JSON.parse(readFileSync(signalPath, "utf8"));
 
   assert.equal(firstOutput.trim(), "{}");
   assert.equal(secondOutput.trim(), "{}");
-  assert.equal(firstSignal, event);
+  assert.notEqual(parsedFirstSignal.signalId, parsedSecondSignal.signalId);
+  assert.equal(parsedSecondSignal.event.transcriptPath, transcriptPath);
 });
 
 test("question-prompt hook forwards its event in a private signal for local extraction", (t) => {
@@ -53,6 +58,7 @@ test("question-prompt hook forwards its event in a private signal for local extr
 
   assert.equal(output.trim(), "{}");
   assert.equal(parsedSignal.hookEventName, "pingWhenReadyQuestionPrompt");
+  assert.match(parsedSignal.signalId, /^[A-Fa-f0-9-]+$/);
   assert.equal(parsedSignal.event.toolArgs.question, "Private question text");
   assert.equal(parsedSignal.event.toolName, "ask_user");
   assert.equal(statSync(signalPath).mode & 0o777, 0o600);
@@ -206,7 +212,6 @@ test("settings sidebar checkboxes reflect and update global notification setting
     format: "cjs",
     external: ["vscode"],
   });
-
   const values = new Map([
     ["notifications.macOS", true],
     ["notifications.sound", false],
@@ -282,9 +287,18 @@ test("iMessage recipient is stored securely and send test commands require confi
   t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
 
   const extensionBundle = path.join(temporaryRoot, "extension.cjs");
+  const secondExtensionBundle = path.join(temporaryRoot, "extension-second.cjs");
   esbuild.buildSync({
     entryPoints: [path.join(__dirname, "..", "src", "extension.ts")],
     outfile: extensionBundle,
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    external: ["vscode"],
+  });
+  esbuild.buildSync({
+    entryPoints: [path.join(__dirname, "..", "src", "extension.ts")],
+    outfile: secondExtensionBundle,
     bundle: true,
     platform: "node",
     format: "cjs",
@@ -296,15 +310,20 @@ test("iMessage recipient is stored securely and send test commands require confi
   const secretStorage = new Map();
   const recipient = "+14155550123";
   const scriptCalls = [];
-  let signalCreated;
+  const soundCalls = [];
+  const signalCreatedHandlers = [];
   let confirmationResponse;
   let selectedSoundFile;
   const soundDialogCalls = [];
   const settings = {
     "pingWhenReady.notifications.macOS": false,
-    "pingWhenReady.notifications.sound": false,
+    "pingWhenReady.notifications.sound": true,
     "pingWhenReady.notifications.iMessage": true,
+    "pingWhenReady.responseSoundFile": path.join(temporaryRoot, "response.wav"),
+    "pingWhenReady.questionSoundFile": path.join(temporaryRoot, "question.wav"),
   };
+  writeFileSync(settings["pingWhenReady.responseSoundFile"], "test sound");
+  writeFileSync(settings["pingWhenReady.questionSoundFile"], "test sound");
   const vscodeMock = {
     window: {
       createOutputChannel: () => ({ appendLine: (line) => outputLines.push(line), dispose() {} }),
@@ -329,7 +348,7 @@ test("iMessage recipient is stored securely and send test commands require confi
         },
       }),
       createFileSystemWatcher: () => ({
-        onDidCreate: (listener) => { signalCreated = listener; },
+        onDidCreate: (listener) => { signalCreatedHandlers.push(listener); },
         onDidChange() {},
         dispose() {},
       }),
@@ -366,10 +385,16 @@ test("iMessage recipient is stored securely and send test commands require confi
   const treeViewHandlers = {};
   const originalLoad = Module._load;
   const originalExecFile = childProcess.execFile;
+  const originalSpawn = childProcess.spawn;
+  t.after(() => { childProcess.spawn = originalSpawn; });
   childProcess.execFile = (file, args, options, callback) => {
     scriptCalls.push({ file, args, options });
     callback(null, "", "");
     return {};
+  };
+  childProcess.spawn = (file, args, options) => {
+    soundCalls.push({ file, args, options });
+    return new EventEmitter();
   };
   Module._load = function (request, parent, isMain) {
     return request === "vscode" ? vscodeMock : originalLoad.call(this, request, parent, isMain);
@@ -377,7 +402,7 @@ test("iMessage recipient is stored securely and send test commands require confi
 
   try {
     const extension = require(extensionBundle);
-    await extension.activate({
+    const context = {
       extensionPath: temporaryRoot,
       globalStorageUri: { fsPath: path.join(temporaryRoot, "storage") },
       subscriptions: [],
@@ -385,7 +410,10 @@ test("iMessage recipient is stored securely and send test commands require confi
         get: async (key) => secretStorage.get(key),
         store: async (key, value) => secretStorage.set(key, value),
       },
-    });
+    };
+    await extension.activate(context);
+    const secondExtension = require(secondExtensionBundle);
+    await secondExtension.activate({ ...context, subscriptions: [] });
     assert.equal(treeViewHandlers.viewId, "pingWhenReady.settings");
     assert.equal(treeViewHandlers.provider.getChildren().length, 7);
   } finally {
@@ -405,11 +433,13 @@ test("iMessage recipient is stored securely and send test commands require confi
   await registeredCommands.get("pingWhenReady.chooseQuestionSound")();
   assert.equal(settings["pingWhenReady.questionSoundFile"], selectedSoundFile);
   assert.equal(soundDialogCalls.length, 2);
+  settings["pingWhenReady.questionSoundFile"] = path.join(temporaryRoot, "question.wav");
 
   selectedSoundFile = undefined;
   const responseSoundBeforeCancel = settings["pingWhenReady.responseSoundFile"];
   await registeredCommands.get("pingWhenReady.chooseResponseSound")();
   assert.equal(settings["pingWhenReady.responseSoundFile"], responseSoundBeforeCancel);
+  settings["pingWhenReady.responseSoundFile"] = path.join(temporaryRoot, "response.wav");
 
   await registeredCommands.get("pingWhenReady.sendTestIMessage")();
   assert.equal(scriptCalls.length, 0);
@@ -431,6 +461,7 @@ test("iMessage recipient is stored securely and send test commands require confi
   confirmationResponse = "Run Agent-Stop Test";
   await registeredCommands.get("pingWhenReady.testAgentStopNotification")();
   assert.equal(scriptCalls.length, 2);
+  assert.equal(soundCalls.length, 1, outputLines.join("\n"));
   assert.deepEqual(scriptCalls[1].args.slice(2), [recipient, "Agent response ready for review."]);
   assert.match(warningMessages.at(-1), /sends a real iMessage/);
 
@@ -440,48 +471,61 @@ test("iMessage recipient is stored securely and send test commands require confi
     data: { content: `Could you answer this? ${"<!-- ping-when-ready:question -->"}` },
   }));
   const signalPath = path.join(temporaryRoot, "storage", "agent-stop.signal");
-  writeFileSync(signalPath, JSON.stringify({ transcriptPath }));
-  await signalCreated({ fsPath: signalPath });
+  writeFileSync(signalPath, JSON.stringify({
+    hookEventName: "pingWhenReadyAgentStop",
+    signalId: "shared-window-test",
+    event: { transcriptPath },
+  }));
+  const signalUri = { fsPath: signalPath };
+  await Promise.all(signalCreatedHandlers.map((handler) => handler(signalUri)));
   for (let attempt = 0; attempt < 100 && scriptCalls.length < 3; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal(scriptCalls.length, 3, outputLines.join("\n"));
+  assert.equal(soundCalls.length, 2);
+  assert.equal(soundCalls[1].args[0], settings["pingWhenReady.questionSoundFile"]);
   assert.deepEqual(scriptCalls[2].args.slice(2), [recipient, "Question from agent: Could you answer this?"]);
+  assert.ok(outputLines.some((line) => line.includes("already claimed by another extension host")));
 
   writeFileSync(transcriptPath, JSON.stringify({
     type: "assistant.message",
     data: { content: "The task is complete." },
   }));
   writeFileSync(signalPath, JSON.stringify({ transcriptPath, timestamp: "later" }));
-  await signalCreated({ fsPath: signalPath });
+  await signalCreatedHandlers[0](signalUri);
   for (let attempt = 0; attempt < 100 && scriptCalls.length < 4; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal(scriptCalls.length, 4, outputLines.join("\n"));
+  assert.equal(soundCalls.length, 3);
   assert.deepEqual(scriptCalls[3].args.slice(2), [recipient, "Agent response: The task is complete."]);
 
   writeFileSync(signalPath, JSON.stringify({
     hookEventName: "pingWhenReadyQuestionPrompt",
+    signalId: "prompt-pending-test",
     timestamp: "later-still",
   }));
-  await signalCreated({ fsPath: signalPath });
+  await signalCreatedHandlers[0](signalUri);
   for (let attempt = 0; attempt < 100 && scriptCalls.length < 5; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal(scriptCalls.length, 5, outputLines.join("\n"));
+  assert.equal(soundCalls.length, 4);
   assert.deepEqual(scriptCalls[4].args.slice(2), [recipient, "Question from agent pending."]);
   assert.match(outputLines.at(-2), /Received Copilot question-prompt signal/);
 
   writeFileSync(signalPath, JSON.stringify({
     hookEventName: "pingWhenReadyQuestionPrompt",
+    signalId: "prompt-with-question-test",
     timestamp: "later-still-again",
     event: { toolName: "ask_user", toolArgs: { question: "Which language should we use next?" } },
   }));
-  await signalCreated({ fsPath: signalPath });
+  await signalCreatedHandlers[0](signalUri);
   for (let attempt = 0; attempt < 100 && scriptCalls.length < 6; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal(scriptCalls.length, 6, outputLines.join("\n"));
+  assert.equal(soundCalls.length, 5);
   assert.deepEqual(scriptCalls[5].args.slice(2), [
     recipient,
     "Question from agent: Which language should we use next?",
@@ -493,12 +537,17 @@ test("iMessage recipient is stored securely and send test commands require confi
     type: "assistant.message",
     data: { content: "The private summary should not be included." },
   }));
-  writeFileSync(signalPath, JSON.stringify({ transcriptPath, timestamp: "generic-only" }));
-  await signalCreated({ fsPath: signalPath });
+  writeFileSync(signalPath, JSON.stringify({
+    hookEventName: "pingWhenReadyAgentStop",
+    signalId: "generic-only-test",
+    event: { transcriptPath },
+  }));
+  await signalCreatedHandlers[0](signalUri);
   for (let attempt = 0; attempt < 100 && scriptCalls.length < 7; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal(scriptCalls.length, 7, outputLines.join("\n"));
+  assert.equal(soundCalls.length, 6);
   assert.deepEqual(scriptCalls[6].args.slice(2), [recipient, "Agent response ready for review."]);
   assert.equal(require("node:fs").existsSync(signalPath), false);
 });

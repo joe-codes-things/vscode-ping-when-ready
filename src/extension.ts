@@ -1,4 +1,5 @@
 import * as childProcess from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
@@ -17,6 +18,7 @@ const output = vscode.window.createOutputChannel("Ping When Ready");
 const lastSignalByPath = new Map<string, string>();
 const activeSounds = new Set<childProcess.ChildProcess>();
 const signalFileName = "agent-stop.signal";
+const handledSignalsDirectory = "handled-signals";
 const iMessageRecipientKey = "pingWhenReady.iMessageRecipient";
 const completionNotification = "Agent response ready for review.";
 const questionNotification = "Question from agent pending.";
@@ -36,6 +38,36 @@ const iMessageScript = [
 
 function setting<T>(key: string, fallback: T): T {
   return vscode.workspace.getConfiguration("pingWhenReady").get<T>(key, fallback);
+}
+
+async function claimSignal(signal: string, storagePath: string): Promise<boolean> {
+  let signalId: string | undefined;
+  try {
+    const parsed: unknown = JSON.parse(signal);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "signalId" in parsed &&
+      typeof parsed.signalId === "string"
+    ) {
+      signalId = parsed.signalId;
+    }
+  } catch {
+    // Hash malformed or legacy signals as-is so they still participate in deduplication.
+  }
+
+  const claimId = createHash("sha256").update(signalId ?? signal).digest("hex");
+  const claimDirectory = path.join(storagePath, handledSignalsDirectory);
+  await fs.mkdir(claimDirectory, { recursive: true });
+  try {
+    await fs.writeFile(path.join(claimDirectory, claimId), "", { flag: "wx", mode: 0o600 });
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function logError(message: string, error: unknown): void {
@@ -133,6 +165,10 @@ function watchSignalFile(context: vscode.ExtensionContext): void {
       if (!signal || lastSignalByPath.get(uri.fsPath) === signal) {
         return;
       }
+      if (!await claimSignal(signal, context.globalStorageUri.fsPath)) {
+        output.appendLine("Skipping a notification signal already claimed by another extension host.");
+        return;
+      }
       lastSignalByPath.set(uri.fsPath, signal);
       let message = completionNotification;
       let summary: string | undefined;
@@ -182,11 +218,19 @@ function watchSignalFile(context: vscode.ExtensionContext): void {
       if (typeof event !== "object" || event === null) {
         return undefined;
       }
-      if ("transcriptPath" in event && typeof event.transcriptPath === "string") {
-        return event.transcriptPath;
+      const payload = "hookEventName" in event &&
+        event.hookEventName === "pingWhenReadyAgentStop" &&
+        "event" in event
+        ? event.event
+        : event;
+      if (typeof payload !== "object" || payload === null) {
+        return undefined;
       }
-      if ("transcript_path" in event && typeof event.transcript_path === "string") {
-        return event.transcript_path;
+      if ("transcriptPath" in payload && typeof payload.transcriptPath === "string") {
+        return payload.transcriptPath;
+      }
+      if ("transcript_path" in payload && typeof payload.transcript_path === "string") {
+        return payload.transcript_path;
       }
       return undefined;
     }

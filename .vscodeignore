@@ -3,6 +3,7 @@
 src/**
 tests/**
 docs/**
+AGENTS.md
 user-interface/**
 sound-fx/**
 tsconfig.json

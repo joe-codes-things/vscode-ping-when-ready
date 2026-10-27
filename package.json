@@ -2,7 +2,7 @@
   "name": "ping-when-ready",
   "displayName": "Ping When Ready",
   "description": "Notify when a Copilot agent asks for input or finishes a response in VS Code.",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "icon": "resources/icon.png",
   "publisher": "joe-codes-things",
   "repository": {
