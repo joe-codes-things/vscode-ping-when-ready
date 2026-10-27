@@ -120,16 +120,21 @@ function watchSignalFile(context: vscode.ExtensionContext): void {
         return;
       }
       lastSignalByPath.set(uri.fsPath, signal);
-      output.appendLine(`Received Copilot agent-stop signal at ${new Date().toISOString()}.`);
       let message = completionNotification;
       try {
         const event: unknown = JSON.parse(signal);
-        const transcriptPath = getTranscriptPath(event);
-        if (!transcriptPath) {
-          throw new Error("The Copilot stop-hook event did not include a transcript path.");
-        }
-        if (await finalAssistantResponseHasQuestionMarker(transcriptPath)) {
+        if (isQuestionPromptSignal(event)) {
           message = questionNotification;
+          output.appendLine(`Received Copilot question-prompt signal at ${new Date().toISOString()}.`);
+        } else {
+          output.appendLine(`Received Copilot agent-stop signal at ${new Date().toISOString()}.`);
+          const transcriptPath = getTranscriptPath(event);
+          if (!transcriptPath) {
+            throw new Error("The Copilot stop-hook event did not include a transcript path.");
+          }
+          if (await finalAssistantResponseHasQuestionMarker(transcriptPath)) {
+            message = questionNotification;
+          }
         }
       } catch (error) {
         output.appendLine(`Could not classify the agent response; using the completion notification. ${error instanceof Error ? error.message : String(error)}`);
@@ -150,6 +155,13 @@ function watchSignalFile(context: vscode.ExtensionContext): void {
         return event.transcript_path;
       }
       return undefined;
+    }
+
+    function isQuestionPromptSignal(event: unknown): boolean {
+      return typeof event === "object" &&
+        event !== null &&
+        "hookEventName" in event &&
+        event.hookEventName === "pingWhenReadyQuestionPrompt";
     }
   };
 
@@ -176,17 +188,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const signalFilePath = path.join(context.globalStorageUri.fsPath, signalFileName);
         const filePath = await installCopilotHook(context.extensionPath, signalFilePath);
         await fs.rm(signalFilePath, { force: true });
-        vscode.window.showInformationMessage(`Copilot agent-stop hook enabled in ${filePath}. Start a new Copilot session to test it.`);
+        vscode.window.showInformationMessage(`Copilot notification hooks enabled in ${filePath}. Start a new Copilot session to test them.`);
       } catch (error) {
-        logError("Could not enable the Copilot agent-stop hook", error);
+        logError("Could not enable the Copilot notification hooks", error);
       }
     }),
     vscode.commands.registerCommand("pingWhenReady.disableCopilotHook", async () => {
       try {
         const filePath = await uninstallCopilotHook();
-        vscode.window.showInformationMessage(`Ping When Ready's Copilot agent-stop hook was removed from ${filePath}.`);
+        vscode.window.showInformationMessage(`Ping When Ready's Copilot notification hooks were removed from ${filePath}.`);
       } catch (error) {
-        logError("Could not disable the Copilot agent-stop hook", error);
+        logError("Could not disable the Copilot notification hooks", error);
       }
     }),
     vscode.commands.registerCommand("pingWhenReady.setIMessageRecipient", async () => {

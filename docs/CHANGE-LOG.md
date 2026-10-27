@@ -11,7 +11,9 @@ All notable changes to this project are documented here.
 - Changed the hook-to-extension signal handoff to extension global storage;
   the user confirmed that a Copilot stop now triggers a notification.
 - Added type-checking, hook configuration and signal tests, development-host
-  launch configuration, and local VSIX packaging.
+  launch configuration, and local VSIX packaging. Compiled output is kept in
+  `dist/`, and versioned VSIX packages are written to `artifacts/`; both are
+  ignored by Git.
 - Switched the iMessage prototype from Shortcuts to direct AppleScript
   automation of Messages, with the recipient held in VS Code SecretStorage.
 - Recorded the user's successful live Copilot stop-hook notification test.
@@ -24,10 +26,16 @@ All notable changes to this project are documented here.
   final-assistant-message transcript classification. Question-marked turns
   send "Question from agent pending."; unmarked or unclassifiable turns send
   "Agent response ready for review."
-- The user confirmed normal agent-response iMessage delivery, but observed no
-  notification for an agent question prompt. Tracking the question-notification
-  failure in [Bugs](./BUGS.md#b001--question-prompt-does-not-trigger-a-notification).
+- The user verified that an explicitly included question marker selects the
+  question iMessage. Plain-text questions without the marker use the normal
+  completion message. Added a `preToolUse` hook matched to `ask_user` so
+  interactive prompts trigger a question-pending notification before the user
+  answers. The user confirmed the prompt notification and subsequent
+  completion notification in a live Extension Development Host session.
+  See the resolved
+  [B001](./BUGS.md#b001--interactive-question-prompt-does-not-trigger-a-notification)
+  record.
 - Added a 30-second timeout and explicit messaging that a successful Apple
   Events request does not prove delivery.
-- WAV/MP3 playback with user-provided files and question-marker behavior in
-  live Copilot sessions remain to be validated.
+- WAV/MP3 playback and agent compliance with the question marker remain to be
+  validated in live Copilot sessions.

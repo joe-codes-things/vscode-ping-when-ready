@@ -2,36 +2,47 @@
 
 ## Current bugs
 
-### B001 — Question prompt does not trigger a notification
-
-- **Component**: Copilot hook / response-category detection
-- **Status**: Open
-- **Extension version**: 0.0.1 (development build)
-- **Environment**: macOS; VS Code version and Copilot session target/version
-  not recorded
-- **Steps to reproduce**:
-  1. Enable the Ping When Ready Copilot hooks.
-  2. Start a new Copilot chat session.
-  3. Ask the agent a task that ends by prompting the user for an answer.
-- **Expected behavior**: The agent-stop hook triggers a notification. If the
-  final assistant message has the question marker, use
-  “Question from agent pending.”; otherwise use
-  “Agent response ready for review.”
-- **Actual behavior**: A normal response notification works, but no
-  notification fired when the agent displayed a question prompt. It is not
-  yet known whether the stop hook failed to run, the session-start marker
-  instruction was not followed, or the transcript parser failed to classify
-  the final message.
-- **Workaround**: No known workaround. Normal completion notifications remain
-  verified.
+No known bugs are currently tracked.
 
 ## Bugs resolved
 
-No bugs have been resolved yet.
+### B001 — Interactive question prompt does not trigger a notification
+
+- **Component**: Copilot hook / interactive question lifecycle
+- **Status**: Fixed
+- **Extension version**: 0.1.0 development build
+- **Environment**: macOS; VS Code Extension Development Host using the Copilot
+  session target. Exact macOS, VS Code, and Copilot versions are not recorded.
+- **Steps to reproduce**:
+  1. Enable Ping When Ready's Copilot notification hooks and start a new
+     Copilot session.
+  2. Ask Copilot to use the interactive question prompt and wait for an answer.
+- **Expected behavior**: Notify when the prompt asks for input, before the
+  user answers; after the user responds, notify again when Copilot completes
+  its follow-up response.
+- **Actual behavior before the fix**: The interactive prompt did not produce
+  an `agentStop` signal while waiting. The hook fired only after the user
+  answered and Copilot completed a follow-up response.
+- **Resolution**: Added a `preToolUse` hook matched only to Copilot's
+  `ask_user` tool. It writes a minimal question-prompt signal without storing
+  the question text; the extension turns that signal into the
+  “Question from agent pending” notification. The existing `agentStop` hook
+  continues to report the completed follow-up response. The user confirmed
+  the interactive-prompt notification works in a live Extension Development
+  Host session.
+- **Validation**: Automated hook/configuration tests, type-checking, and
+  compilation pass. Live Copilot testing confirmed the prompt notification
+  arrives before answering, and the regular completion notification arrives
+  after Copilot responds to the answer.
+- **Research**: VS Code's documented Copilot hook events do not include the
+  Copilot CLI `notification` event. GitHub documents `ask_user` as a tool and
+  `preToolUse` matchers as a supported way to target tools.
+  [VS Code agent hooks](https://code.visualstudio.com/docs/agent-customization/hooks)
+  · [GitHub Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference)
 
 ## Reporting format
 
-Assign the next unused sequential ID (currently `B001`). Include:
+Assign the next unused sequential ID (currently `B002`). Include:
 
 - **Title**
 - **Component**

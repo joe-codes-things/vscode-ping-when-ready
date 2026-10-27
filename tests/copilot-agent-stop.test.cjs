@@ -37,6 +37,23 @@ test("agent-stop hook preserves the event payload for transcript classification"
   assert.equal(firstSignal, event);
 });
 
+test("question-prompt hook signals without persisting the question payload", (t) => {
+  const workspace = mkdtempSync(path.join(os.tmpdir(), "ping-when-ready-question-"));
+  t.after(() => rmSync(workspace, { recursive: true, force: true }));
+
+  const signalPath = path.join(workspace, "agent-stop.signal");
+  const output = execFileSync("/bin/sh", [hookScript, "question-prompt", signalPath], {
+    cwd: workspace,
+    encoding: "utf8",
+    input: JSON.stringify({ toolName: "ask_user", toolArgs: { question: "Private question text" } }),
+  });
+  const signal = readFileSync(signalPath, "utf8");
+
+  assert.equal(output.trim(), "{}");
+  assert.match(signal, /"hookEventName":"pingWhenReadyQuestionPrompt"/);
+  assert.doesNotMatch(signal, /Private question text|toolArgs|ask_user/);
+});
+
 test("session-start hook adds the question-marker instruction to agent context", () => {
   const output = execFileSync("/bin/sh", [hookScript, "session-start"], { encoding: "utf8" });
   const result = JSON.parse(output);
@@ -74,7 +91,11 @@ test("hook installation preserves other user hooks and can be removed", async (t
   mkdirSync(path.dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify({
     version: 1,
-    hooks: { agentStop: [unrelatedHook], sessionStart: [unrelatedHook] },
+    hooks: {
+      agentStop: [unrelatedHook],
+      sessionStart: [unrelatedHook],
+      preToolUse: [unrelatedHook],
+    },
   }));
 
   await installCopilotHook(extensionPath, signalFilePath);
@@ -96,12 +117,22 @@ test("hook installation preserves other user hooks and can be removed", async (t
       args: [path.join(extensionPath, "scripts", "copilot-agent-stop.sh"), "session-start"],
     },
   ]);
+  assert.deepEqual(installed.hooks.preToolUse, [
+    unrelatedHook,
+    {
+      type: "command",
+      exec: "/bin/sh",
+      args: [path.join(extensionPath, "scripts", "copilot-agent-stop.sh"), "question-prompt", signalFilePath],
+      matcher: "ask_user",
+    },
+  ]);
 
   await uninstallCopilotHook();
   const uninstalled = JSON.parse(readFileSync(configPath, "utf8"));
   assert.deepEqual(uninstalled.hooks, {
     agentStop: [unrelatedHook],
     sessionStart: [unrelatedHook],
+    preToolUse: [unrelatedHook],
   });
 });
 
@@ -277,4 +308,16 @@ test("iMessage recipient is stored securely and send test commands require confi
   }
   assert.equal(scriptCalls.length, 4, outputLines.join("\n"));
   assert.deepEqual(scriptCalls[3].args.slice(2), [recipient, "Agent response ready for review."]);
+
+  writeFileSync(signalPath, JSON.stringify({
+    hookEventName: "pingWhenReadyQuestionPrompt",
+    timestamp: "later-still",
+  }));
+  await signalCreated({ fsPath: signalPath });
+  for (let attempt = 0; attempt < 100 && scriptCalls.length < 5; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(scriptCalls.length, 5, outputLines.join("\n"));
+  assert.deepEqual(scriptCalls[4].args.slice(2), [recipient, "Question from agent pending."]);
+  assert.match(outputLines.at(-2), /Received Copilot question-prompt signal/);
 });

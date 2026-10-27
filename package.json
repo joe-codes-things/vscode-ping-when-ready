@@ -1,7 +1,7 @@
 {
   "name": "ping-when-ready",
   "displayName": "Ping When Ready",
-  "description": "Notify when a Copilot agent finishes a response in VS Code.",
+  "description": "Notify when a Copilot agent asks for input or finishes a response in VS Code.",
   "version": "0.1.0",
   "publisher": "joe-codes-things",
   "repository": {
@@ -27,17 +27,17 @@
     "watch": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js --watch",
     "check-types": "tsc --noEmit",
     "test": "node --test tests/*.test.cjs",
-    "package": "npm run compile && vsce package"
+    "package": "npm run compile && mkdir -p artifacts && vsce package --out artifacts/$npm_package_name-$npm_package_version.vsix"
   },
   "contributes": {
     "commands": [
       {
         "command": "pingWhenReady.enableCopilotHook",
-        "title": "Ping When Ready: Enable Copilot Stop Hook"
+        "title": "Ping When Ready: Enable Copilot Notification Hooks"
       },
       {
         "command": "pingWhenReady.disableCopilotHook",
-        "title": "Ping When Ready: Disable Copilot Stop Hook"
+        "title": "Ping When Ready: Disable Copilot Notification Hooks"
       },
       {
         "command": "pingWhenReady.sendTestIMessage",

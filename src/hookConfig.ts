@@ -8,6 +8,7 @@ type HookCommand = {
   type: "command";
   exec: string;
   args: string[];
+  matcher?: string;
 };
 
 type HookConfiguration = {
@@ -21,12 +22,16 @@ function hookConfigurationPath(): string {
   return path.join(copilotHome, "hooks", hookFileName);
 }
 
-function createHook(extensionPath: string, args: string[]): HookCommand {
-  return {
+function createHook(extensionPath: string, args: string[], matcher?: string): HookCommand {
+  const hook: HookCommand = {
     type: "command",
     exec: "/bin/sh",
     args: [path.join(extensionPath, "scripts", "copilot-agent-stop.sh"), ...args],
   };
+  if (matcher) {
+    hook.matcher = matcher;
+  }
+  return hook;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -98,6 +103,10 @@ export async function installCopilotHook(
       event: "sessionStart",
       hook: createHook(extensionPath, ["session-start"]),
     },
+    {
+      event: "preToolUse",
+      hook: createHook(extensionPath, ["question-prompt", signalFilePath], "ask_user"),
+    },
   ];
   for (const { event, hook } of hookEntries) {
     const hooks = config.hooks[event] ?? [];
@@ -114,7 +123,7 @@ export async function installCopilotHook(
 export async function uninstallCopilotHook(): Promise<string> {
   const filePath = hookConfigurationPath();
   const config = await readHookConfiguration(filePath);
-  for (const event of ["agentStop", "sessionStart"]) {
+  for (const event of ["agentStop", "sessionStart", "preToolUse"]) {
     const hooks = config.hooks[event];
     if (hooks) {
       config.hooks[event] = hooks.filter((hook) => !isPingWhenReadyHook(hook));

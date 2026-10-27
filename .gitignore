@@ -3,4 +3,5 @@
 .ping-when-ready.signal
 node_modules/
 dist/
+artifacts/
 *.vsix

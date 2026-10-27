@@ -26,9 +26,11 @@ Assign the next available ID (`F001`, `F002`, ...). Include:
 - **Proposed behavior**: Use Copilot's `agentStop` hook to trigger a native
   macOS notification, with optional sound and iMessage channels.
 - **Trade-offs or open questions**: VS Code's hooks are in Preview and need
-  broader testing for timing and duplicate behavior. Question classification
-  uses a best-effort marker in the final assistant transcript and needs live
-  validation. WAV/MP3 sound playback remains unvalidated. Keep the extension
+  broader testing for timing and duplicate behavior. Interactive prompt
+  notifications use a `preToolUse` hook matched to `ask_user` and are
+  confirmed in a live session. Question classification uses a best-effort
+  marker in the final assistant transcript; explicit marker behavior was
+  tested. WAV/MP3 sound playback remains unvalidated. Keep the extension
   private and intended for personal use.
 - **References**:
   [VS Code agent hooks guide](https://code.visualstudio.com/docs/agent-customization/hooks)

@@ -1,16 +1,18 @@
 # Ping When Ready
 
-A personal macOS VS Code extension that uses a Copilot agent-stop hook to
-trigger a native macOS notification, optional sound, and optional iMessage.
-Copilot hooks are in Preview, so completion timing still needs to be validated
-in real sessions.
+A personal macOS VS Code extension that uses Copilot hooks to trigger a native
+macOS notification, optional sound, and optional iMessage when an agent finishes
+a response or asks the user for input. The `ask_user` prompt notification and
+follow-up completion notification have been confirmed in a live Extension
+Development Host session. Copilot hooks are in Preview, so broader timing and
+duplicate behavior still need validation.
 
 ## Development
 
 1. Run `npm install`.
 2. Open this folder in VS Code and press **F5** to launch an Extension
    Development Host.
-3. In the Extension Development Host, run **Ping When Ready: Enable Copilot Stop Hook**
+3. In the Extension Development Host, run **Ping When Ready: Enable Copilot Notification Hooks**
    to install or update the user-level Copilot hooks. Start a new Copilot
    session; its session-start hook supplies the marker instruction to the agent.
 4. To test iMessage, run **Ping When Ready: Set iMessage Recipient** and enter
@@ -26,7 +28,9 @@ in real sessions.
 7. Run **Ping When Ready: Test Agent-Stop Notification** to simulate the hook
    and test the enabled notification channels. It asks for confirmation if
    iMessage is enabled because it sends a real message.
-8. Run `npm run package` to build a `.vsix` for local installation.
+8. Run `npm run package` to build a `.vsix` for local installation. The
+   compiled bundle is in `dist/`; the installable package is written to
+   `artifacts/`.
 
 For an agent response that explicitly needs your answer or decision, the
 extension asks the agent to append a hidden `<!-- ping-when-ready:question -->`

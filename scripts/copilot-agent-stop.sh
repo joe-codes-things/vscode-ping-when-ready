@@ -13,6 +13,33 @@ if [ "$hook_mode" = "session-start" ]; then
   exit 0
 fi
 
+if [ "$hook_mode" = "question-prompt" ]; then
+  if [ "$#" -ne 2 ]; then
+    printf '%s\n' "Invalid question-prompt hook arguments." >&2
+    printf '{}\n'
+    exit 0
+  fi
+
+  signal_file="$2"
+  signal_directory="$(dirname "$signal_file")"
+  temporary_file="${signal_file}.$$"
+  signal_timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')-$$"
+
+  umask 077
+  if cat >/dev/null &&
+    mkdir -p "$signal_directory" &&
+    printf '{"hookEventName":"pingWhenReadyQuestionPrompt","timestamp":"%s"}\n' "$signal_timestamp" > "$temporary_file" &&
+    mv -f "$temporary_file" "$signal_file"; then
+    :
+  else
+    printf '%s\n' "Ping When Ready could not write the question-prompt signal." >&2
+    rm -f "$temporary_file"
+  fi
+
+  printf '{}\n'
+  exit 0
+fi
+
 if [ "$hook_mode" != "agent-stop" ] || [ "$#" -ne 2 ]; then
   printf '%s\n' "Invalid Ping When Ready hook arguments." >&2
   printf '{}\n'
