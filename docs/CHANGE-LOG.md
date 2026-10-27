@@ -37,5 +37,16 @@ All notable changes to this project are documented here.
   record.
 - Added a 30-second timeout and explicit messaging that a successful Apple
   Events request does not prove delivery.
+- Added local, extractive response and question excerpts to notification
+  messages, capped at 120 characters. The setting
+  `pingWhenReady.notifications.includeSummary` defaults to enabled and can
+  restore generic-only text. Summary notifications use the formats
+  "Agent response: [response text]" and
+  "Question from agent: [question text]". Interactive prompt input is held
+  briefly in a mode-0600 signal file and removed after processing; no external
+  summarizer is used.
+- The user confirmed live notifications display
+  "Agent response: [response text]" and
+  "Question from agent: [question text]" as requested.
 - WAV/MP3 playback and agent compliance with the question marker remain to be
   validated in live Copilot sessions.

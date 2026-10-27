@@ -77,6 +77,12 @@
           "default": false,
           "order": 3,
           "description": "Send an iMessage through the macOS Messages app when a Copilot agent finishes a turn. Check this box to receive iMessages; set the recipient with the Ping When Ready: Set iMessage Recipient command."
+        },
+        "pingWhenReady.notifications.includeSummary": {
+          "type": "boolean",
+          "default": true,
+          "order": 4,
+          "description": "Include a short local excerpt from the agent's response or question in notifications and iMessages. Disable to use generic notification text only."
         }
       }
     }

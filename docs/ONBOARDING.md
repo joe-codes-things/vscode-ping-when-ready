@@ -19,11 +19,10 @@ channels still need validation.
 - `src/hookConfig.ts` installs/removes the user-level Copilot hooks while
   preserving other configured hooks.
 - `scripts/copilot-agent-stop.sh` injects the question-marker direction at
-  session start, writes agent-stop payloads, and writes minimal prompt-start
-  signals for the `ask_user` tool to extension global storage.
-- `src/responseCategory.ts` inspects the final assistant transcript entry for
-  the marker; unknown or unreadable transcripts fall back to the completion
-  notification.
+  session start, writes agent-stop payloads, and writes question-prompt event
+  payloads for the `ask_user` tool to extension global storage.
+- `src/responseCategory.ts` reads the final assistant transcript entry,
+  classifies marked questions, and extracts bounded local summaries.
 - `package.json`, `tsconfig.json`, and `.vscode/` configure compilation,
   type-checking, tests, packaging, and launching the Extension Development
   Host.
@@ -56,12 +55,13 @@ The implementation uses user-level Copilot `sessionStart`, `preToolUse`, and
 `agentStop` command hooks plus an extension-global-storage signal file. At
 session start, the first hook adds a best-effort instruction to mark final
 assistant responses that explicitly ask the user to answer or decide. The
-`preToolUse` hook is matched only to `ask_user`; it discards the input payload
-and writes a minimal signal so question text is not persisted. At agent stop,
-the hook writes the event payload, including the transcript path. The
-extension reads the last `assistant.message` entry and selects one of two
-fixed notification messages based on the marker. Missing markers or unreadable
-transcripts fall back to the normal completion notification.
+`preToolUse` hook is matched only to `ask_user`; it writes the hook event to a
+mode-0600 signal file so the extension can extract the question text. The
+extension removes this signal after reading it. At agent stop, the hook writes
+the event payload, including the transcript path. The extension reads the last
+`assistant.message` entry, selects the completion or question label based on
+the marker, and extracts a short summary locally. Missing or unreadable content
+falls back to the generic notification text.
 
 The user confirmed that an interactive question prompt triggers the
 question-pending notification before they answer, and that Copilot's subsequent
@@ -106,10 +106,11 @@ treating it as reliable.
 
 The hook uses a unique signal in extension global storage rather than the
 Copilot hook process's working directory. This avoids requiring the extension
-and hook to share a workspace. The signal file carries the hook's JSON event
-payload, including a local transcript path, but does not copy transcript
-contents. The extension reads the final assistant message locally only to
-check for the marker; it does not send chat content in notifications.
+and hook to share a workspace. The agent-stop signal carries the event payload,
+including a local transcript path, but does not copy transcript contents. The
+extension reads the final assistant message locally for classification and
+summary extraction. For `ask_user`, the signal briefly carries the tool input;
+it is protected by the hook's `umask 077` and removed after processing.
 
 #### Response category marker
 
@@ -124,14 +125,21 @@ rhetorical or quoted questions.
 
 If the agent omits the marker, transcript reading fails, or transcript entries
 change in a future VS Code version, the extension is designed to send the
-ordinary **“Agent response ready for review.”** message. Marker recognition
-changes only the label to **“Question from agent pending.”**; it never
-suppresses the agent-stop notification. For the interactive question UI, a
-separate `preToolUse` hook matched to `ask_user` sends the question-pending
-notification at prompt time. This behavior and the follow-up completion
-notification were confirmed in a live Copilot session. Since hooks and
-transcript structure are preview or implementation details, validate both
-types with live Copilot responses.
+ordinary completion notification. Marker recognition changes only the label
+to the question-pending message; it never suppresses the agent-stop
+notification. For the interactive question UI, a separate `preToolUse` hook
+matched to `ask_user` sends the question-pending notification at prompt time.
+The extension extracts the first sentence or paragraph locally, cleans common
+Markdown formatting, and caps the excerpt at 120 characters. Empty or
+unavailable content leaves the generic label unchanged. The
+`pingWhenReady.notifications.includeSummary` setting controls whether excerpts
+are included; it defaults to enabled and can be disabled for generic-only
+notification text. With summaries enabled, bodies are formatted as
+**“Agent response: [response text]”** or
+**“Question from agent: [question text]”**. Excerpts are included in both
+enabled macOS notifications and iMessages, so they may be visible in
+notification previews or message history. No remote summarization service is
+used.
 
 ### Visual notification
 
@@ -152,6 +160,11 @@ portable VS Code API. The user prefers this native macOS banner style, so
 treat it as the target visual channel. Optionally offer the VS Code in-app
 message as a separate channel.
 
+The notification body may also contain a short local excerpt from the agent's
+response or interactive question. Keep excerpts concise and expose the
+generic-only option in settings because banners and previews can reveal
+conversation details.
+
 ### Settings and notification channels
 
 Preferences are contributed through `contributes.configuration`. Separate
@@ -164,6 +177,9 @@ Sound currently uses an absolute path to a local WAV or MP3 file; the user
 plans to provide candidate sounds later. iMessage recipient setup uses VS Code
 SecretStorage. Separate commands test iMessage directly and simulate the full
 agent-stop notification pipeline.
+**Notifications: Include Summary** is enabled by default and adds a short
+extractive excerpt to native notifications and iMessages; disable it to keep
+the generic-only message text.
 
 ### Sound playback
 
@@ -184,13 +200,13 @@ any sound assets supplied or packaged.
 
 VS Code has no iMessage API. The current prototype invokes `/usr/bin/osascript`
 to automate the macOS Messages app with AppleScript. It selects an iMessage
-service, addresses the configured buddy, and sends a generic completion
-message; it does not include the agent's response text. The user sets the
-recipient with **Ping When Ready: Set iMessage Recipient**. The number is
-stored in VS Code SecretStorage, not in settings, hook arguments, logs, or
-repository files. SecretStorage persists across VS Code restarts in the same
-profile, so the number only needs to be entered once per profile. The feature
-is disabled by default.
+service, addresses the configured buddy, and sends the notification text,
+including a short response/question excerpt when summaries are enabled. The
+user sets the recipient with **Ping When Ready: Set iMessage Recipient**. The
+number is stored in VS Code SecretStorage, not in settings, hook arguments,
+logs, or repository files. SecretStorage persists across VS Code restarts in
+the same profile, so the number only needs to be entered once per profile.
+The feature is disabled by default.
 
 The dedicated **Ping When Ready: Send Test iMessage** command requires modal
 confirmation before sending a separate test message. A successful AppleScript
@@ -316,6 +332,9 @@ the automation requester on the installed VS Code build.
   question prompt and subsequent completion notification were both confirmed
   after adding a `preToolUse` hook matched to `ask_user`. See the resolved
   [B001](./BUGS.md#b001--interactive-question-prompt-does-not-trigger-a-notification).
+- The user confirmed live response and interactive-question summaries display
+  with the requested "Agent response: ..." and "Question from agent: ..."
+  formats.
 - Automated checks cover hook signal creation and hook configuration
   installation/removal, but do not exercise a live Copilot session or prove
   that all Copilot stop attempts correspond to completed user-visible replies.
@@ -325,3 +344,14 @@ the automation requester on the installed VS Code build.
 The extension is intended for private, personal use, not publication as a
 public Marketplace extension. Use F5 for development or build a `.vsix` for
 local installation. The `.vsix` is stored under `artifacts/`.
+
+### Git authorship
+
+Use the repository owner's configured Git identity for both commit authorship
+and committers. Do not add co-author, sign-off, or other attribution trailers
+for Copilot, agents, models, bots, or automation. Before publishing, inspect
+every outgoing commit's author, committer, and complete message. The local
+`.github/` and `.githooks/` directories are intentionally Git-ignored in this
+checkout; any files there are local-only unless the owner explicitly approves
+a tracking-policy change. Check whether a pre-push hook or CI check is active
+before relying on attribution enforcement.

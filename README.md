@@ -34,9 +34,13 @@ duplicate behavior still need validation.
 
 For an agent response that explicitly needs your answer or decision, the
 extension asks the agent to append a hidden `<!-- ping-when-ready:question -->`
-marker on its final line. When that marker is present in the final assistant
-message, notifications say **“Question from agent pending.”** Otherwise they
-say **“Agent response ready for review.”** The marker is a best-effort hint;
+marker on its final line. When a short summary is available, notifications use
+**“Question from agent: [question text]”** or
+**“Agent response: [response text]”**. The excerpt is extracted locally and
+capped at 120 characters. Disable **Notifications: Include Summary** in
+Settings to use generic-only text. When a summary is unavailable, the
+extension uses **“Question from agent pending.”** or
+**“Agent response ready for review.”** The marker is a best-effort hint;
 missing it still produces the normal completion notification.
 
 The macOS banner is enabled by default. Sound and iMessage are off by default.

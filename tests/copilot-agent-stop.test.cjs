@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
-const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } = require("node:fs");
 const childProcess = require("node:child_process");
 const Module = require("node:module");
 const os = require("node:os");
@@ -25,6 +25,7 @@ test("agent-stop hook preserves the event payload for transcript classification"
     input: event,
   });
   const firstSignal = readFileSync(signalPath, "utf8");
+  assert.equal(firstSignal, event);
 
   const secondOutput = execFileSync("/bin/sh", [hookScript, "agent-stop", signalPath], {
     cwd: workspace,
@@ -37,7 +38,7 @@ test("agent-stop hook preserves the event payload for transcript classification"
   assert.equal(firstSignal, event);
 });
 
-test("question-prompt hook signals without persisting the question payload", (t) => {
+test("question-prompt hook forwards its event in a private signal for local extraction", (t) => {
   const workspace = mkdtempSync(path.join(os.tmpdir(), "ping-when-ready-question-"));
   t.after(() => rmSync(workspace, { recursive: true, force: true }));
 
@@ -48,10 +49,13 @@ test("question-prompt hook signals without persisting the question payload", (t)
     input: JSON.stringify({ toolName: "ask_user", toolArgs: { question: "Private question text" } }),
   });
   const signal = readFileSync(signalPath, "utf8");
+  const parsedSignal = JSON.parse(signal);
 
   assert.equal(output.trim(), "{}");
-  assert.match(signal, /"hookEventName":"pingWhenReadyQuestionPrompt"/);
-  assert.doesNotMatch(signal, /Private question text|toolArgs|ask_user/);
+  assert.equal(parsedSignal.hookEventName, "pingWhenReadyQuestionPrompt");
+  assert.equal(parsedSignal.event.toolArgs.question, "Private question text");
+  assert.equal(parsedSignal.event.toolName, "ask_user");
+  assert.equal(statSync(signalPath).mode & 0o777, 0o600);
 });
 
 test("session-start hook adds the question-marker instruction to agent context", () => {
@@ -148,7 +152,12 @@ test("question marker classification uses only the final assistant message", asy
     platform: "node",
     format: "cjs",
   });
-  const { finalAssistantResponseHasQuestionMarker } = require(modulePath);
+  const {
+    extractQuestionText,
+    finalAssistantResponse,
+    responseHasQuestionMarker,
+    summarizeText,
+  } = require(modulePath);
   const transcriptPath = path.join(temporaryRoot, "session.jsonl");
   const entry = (type, content) => JSON.stringify({ type, data: { content } });
 
@@ -157,20 +166,31 @@ test("question marker classification uses only the final assistant message", asy
     entry("user.message", "The marker from an old response may appear in transcript history."),
     entry("assistant.message", "Agent response ready for review."),
   ].join("\n"));
-  assert.equal(await finalAssistantResponseHasQuestionMarker(transcriptPath), false);
+  let response = await finalAssistantResponse(transcriptPath);
+  assert.equal(responseHasQuestionMarker(response), false);
+  assert.equal(summarizeText(response), "Agent response ready for review.");
 
   writeFileSync(transcriptPath, [
     entry("assistant.message", "The answer is ready."),
     entry("assistant.message", "Should I proceed? <!-- ping-when-ready:question -->"),
     entry("assistant.turn_end", ""),
   ].join("\n"));
-  assert.equal(await finalAssistantResponseHasQuestionMarker(transcriptPath), true);
+  response = await finalAssistantResponse(transcriptPath);
+  assert.equal(responseHasQuestionMarker(response), true);
+  assert.equal(summarizeText(response), "Should I proceed?");
 
   writeFileSync(transcriptPath, entry(
     "assistant.message",
     "This explains the marker <!-- ping-when-ready:question --> but is not marked as a question.",
   ));
-  assert.equal(await finalAssistantResponseHasQuestionMarker(transcriptPath), false);
+  response = await finalAssistantResponse(transcriptPath);
+  assert.equal(responseHasQuestionMarker(response), false);
+  assert.equal(summarizeText(response), "This explains the marker but is not marked as a question.");
+
+  assert.equal(extractQuestionText({ question: "Which language should we use?", choices: ["A", "B"] }), "Which language should we use?");
+  assert.equal(extractQuestionText({ question: `${"A".repeat(200)}?` }).length, 120);
+  assert.equal(extractQuestionText({ options: ["A", "B"] }), undefined);
+  assert.equal(summarizeText("## Summary\n\nSecond paragraph is longer."), "Summary");
 });
 
 test("iMessage recipient is stored securely and send test commands require confirmation", async (t) => {
@@ -295,7 +315,7 @@ test("iMessage recipient is stored securely and send test commands require confi
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal(scriptCalls.length, 3, outputLines.join("\n"));
-  assert.deepEqual(scriptCalls[2].args.slice(2), [recipient, "Question from agent pending."]);
+  assert.deepEqual(scriptCalls[2].args.slice(2), [recipient, "Question from agent: Could you answer this?"]);
 
   writeFileSync(transcriptPath, JSON.stringify({
     type: "assistant.message",
@@ -307,7 +327,7 @@ test("iMessage recipient is stored securely and send test commands require confi
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal(scriptCalls.length, 4, outputLines.join("\n"));
-  assert.deepEqual(scriptCalls[3].args.slice(2), [recipient, "Agent response ready for review."]);
+  assert.deepEqual(scriptCalls[3].args.slice(2), [recipient, "Agent response: The task is complete."]);
 
   writeFileSync(signalPath, JSON.stringify({
     hookEventName: "pingWhenReadyQuestionPrompt",
@@ -320,4 +340,34 @@ test("iMessage recipient is stored securely and send test commands require confi
   assert.equal(scriptCalls.length, 5, outputLines.join("\n"));
   assert.deepEqual(scriptCalls[4].args.slice(2), [recipient, "Question from agent pending."]);
   assert.match(outputLines.at(-2), /Received Copilot question-prompt signal/);
+
+  writeFileSync(signalPath, JSON.stringify({
+    hookEventName: "pingWhenReadyQuestionPrompt",
+    timestamp: "later-still-again",
+    event: { toolName: "ask_user", toolArgs: { question: "Which language should we use next?" } },
+  }));
+  await signalCreated({ fsPath: signalPath });
+  for (let attempt = 0; attempt < 100 && scriptCalls.length < 6; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(scriptCalls.length, 6, outputLines.join("\n"));
+  assert.deepEqual(scriptCalls[5].args.slice(2), [
+    recipient,
+    "Question from agent: Which language should we use next?",
+  ]);
+  assert.equal(require("node:fs").existsSync(signalPath), false);
+
+  settings["pingWhenReady.notifications.includeSummary"] = false;
+  writeFileSync(transcriptPath, JSON.stringify({
+    type: "assistant.message",
+    data: { content: "The private summary should not be included." },
+  }));
+  writeFileSync(signalPath, JSON.stringify({ transcriptPath, timestamp: "generic-only" }));
+  await signalCreated({ fsPath: signalPath });
+  for (let attempt = 0; attempt < 100 && scriptCalls.length < 7; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(scriptCalls.length, 7, outputLines.join("\n"));
+  assert.deepEqual(scriptCalls[6].args.slice(2), [recipient, "Agent response ready for review."]);
+  assert.equal(require("node:fs").existsSync(signalPath), false);
 });

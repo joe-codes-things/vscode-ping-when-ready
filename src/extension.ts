@@ -4,7 +4,12 @@ import * as path from "node:path";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
 import { installCopilotHook, uninstallCopilotHook } from "./hookConfig";
-import { finalAssistantResponseHasQuestionMarker } from "./responseCategory";
+import {
+  extractQuestionText,
+  finalAssistantResponse,
+  responseHasQuestionMarker,
+  summarizeText,
+} from "./responseCategory";
 
 const execFile = promisify(childProcess.execFile);
 const output = vscode.window.createOutputChannel("Ping When Ready");
@@ -14,6 +19,8 @@ const signalFileName = "agent-stop.signal";
 const iMessageRecipientKey = "pingWhenReady.iMessageRecipient";
 const completionNotification = "Agent response ready for review.";
 const questionNotification = "Question from agent pending.";
+const completionSummaryPrefix = "Agent response:";
+const questionSummaryPrefix = "Question from agent:";
 const iMessageScript = [
   "on run argv",
   "set recipientNumber to item 1 of argv",
@@ -90,16 +97,21 @@ async function notify(
   context: vscode.ExtensionContext,
   message = completionNotification,
   includeIMessage = true,
+  summary?: string,
 ): Promise<void> {
+  const summaryPrefix = message === questionNotification ? questionSummaryPrefix : completionSummaryPrefix;
+  const notificationMessage = setting<boolean>("notifications.includeSummary", true) && summary
+    ? `${summaryPrefix} ${summary}`
+    : message;
   const work: Promise<void>[] = [];
   if (setting<boolean>("notifications.macOS", true)) {
-    work.push(showNativeNotification(message));
+    work.push(showNativeNotification(notificationMessage));
   }
   if (setting<boolean>("notifications.sound", false)) {
     work.push(playSound());
   }
   if (includeIMessage && setting<boolean>("notifications.iMessage", false)) {
-    work.push(sendIMessage(context, message));
+    work.push(sendIMessage(context, notificationMessage));
   }
   const results = await Promise.allSettled(work);
   for (const result of results) {
@@ -121,10 +133,12 @@ function watchSignalFile(context: vscode.ExtensionContext): void {
       }
       lastSignalByPath.set(uri.fsPath, signal);
       let message = completionNotification;
+      let summary: string | undefined;
       try {
         const event: unknown = JSON.parse(signal);
         if (isQuestionPromptSignal(event)) {
           message = questionNotification;
+          summary = extractQuestionText(getQuestionToolArgs(event));
           output.appendLine(`Received Copilot question-prompt signal at ${new Date().toISOString()}.`);
         } else {
           output.appendLine(`Received Copilot agent-stop signal at ${new Date().toISOString()}.`);
@@ -132,14 +146,32 @@ function watchSignalFile(context: vscode.ExtensionContext): void {
           if (!transcriptPath) {
             throw new Error("The Copilot stop-hook event did not include a transcript path.");
           }
-          if (await finalAssistantResponseHasQuestionMarker(transcriptPath)) {
-            message = questionNotification;
+          const response = await finalAssistantResponse(transcriptPath);
+          if (response) {
+            summary = summarizeText(response);
+            if (responseHasQuestionMarker(response)) {
+              message = questionNotification;
+            }
+          }
+          if (!response) {
+            output.appendLine("The Copilot transcript did not contain a final assistant message.");
           }
         }
       } catch (error) {
         output.appendLine(`Could not classify the agent response; using the completion notification. ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        try {
+          const currentSignal = (await fs.readFile(uri.fsPath, "utf8")).trim();
+          if (currentSignal === signal) {
+            await fs.rm(uri.fsPath, { force: true });
+          }
+        } catch (error) {
+          if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+            logError("Could not remove the processed notification signal", error);
+          }
+        }
       }
-      await notify(context, message);
+      await notify(context, message, true, summary);
     } catch (error) {
       logError("Could not process the Copilot agent-stop signal", error);
     }
@@ -163,6 +195,17 @@ function watchSignalFile(context: vscode.ExtensionContext): void {
         "hookEventName" in event &&
         event.hookEventName === "pingWhenReadyQuestionPrompt";
     }
+
+    function getQuestionToolArgs(event: unknown): unknown {
+      if (typeof event !== "object" || event === null || !("event" in event)) {
+        return undefined;
+      }
+      const hookEvent = event.event;
+      if (typeof hookEvent !== "object" || hookEvent === null || !("toolArgs" in hookEvent)) {
+        return undefined;
+      }
+      return hookEvent.toolArgs;
+    }
   };
 
   watcher.onDidCreate((uri) => void handleSignal(uri));
@@ -180,6 +223,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   await fs.mkdir(context.globalStorageUri.fsPath, { recursive: true });
+  await fs.rm(path.join(context.globalStorageUri.fsPath, signalFileName), { force: true });
   watchSignalFile(context);
 
   context.subscriptions.push(

@@ -1,6 +1,7 @@
 # Feature Ideas
 
-Ideas are being collected for discussion and prototyping.
+Ideas are tracked here before implementation begins or while they are being
+developed.
 
 ## Tracking format
 
@@ -8,49 +9,62 @@ Assign the next available ID (`F001`, `F002`, ...). Include:
 
 - **Title**
 - **Component**
-- **Status**: Proposed, Exploring, Planned, Implemented, or Declined
+- **Status**: Proposed, Exploring, Planned, Built, or Abandoned
 - **User problem**
 - **Proposed behavior**
 - **Trade-offs or open questions**
 - **References** (for researched ideas)
 
+Every idea must retain an explicit status whenever this document is edited.
+When work is completed or intentionally stopped, update its status to **Built**
+or **Abandoned**, respectively.
+
 ## Ideas
 
-### F001 — Notify when an agent finishes responding
+### F001 — Notify when an agent finishes responding or asks for input
 
 - **Component**: VS Code extension
-- **Status**: Implemented (initial macOS prototype; live Copilot stop trigger
-  and native notification confirmed by user)
-- **User problem**: It is easy to miss when an agent has finished responding,
-  especially when attention is elsewhere.
-- **Proposed behavior**: Use Copilot's `agentStop` hook to trigger a native
-  macOS notification, with optional sound and iMessage channels.
-- **Trade-offs or open questions**: VS Code's hooks are in Preview and need
-  broader testing for timing and duplicate behavior. Interactive prompt
-  notifications use a `preToolUse` hook matched to `ask_user` and are
-  confirmed in a live session. Question classification uses a best-effort
-  marker in the final assistant transcript; explicit marker behavior was
-  tested. WAV/MP3 sound playback remains unvalidated. Keep the extension
-  private and intended for personal use.
+- **Status**: Built (core completion and question notifications are implemented
+  and confirmed in live testing; optional sound and iMessage channels have
+  separate validation details in [Project Onboarding](./ONBOARDING.md))
+- **User problem**: It is easy to miss when an agent has finished responding
+  or is waiting for the user, especially when attention is elsewhere.
+- **Proposed behavior**: Trigger native macOS notifications for completed
+  agent turns and interactive questions, with optional sound and iMessage
+  channels.
+- **Trade-offs or open questions**: VS Code's agent hooks are in Preview, so
+  continue monitoring behavior across VS Code and Copilot updates. Keep the
+  extension private and intended for personal use.
 - **References**:
   [VS Code agent hooks guide](https://code.visualstudio.com/docs/agent-customization/hooks)
   and [Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference).
 
-### F002 — Send an iMessage when an agent finishes
+### F002 — Include a concise response or question summary in notifications
 
-- **Component**: Optional macOS notification channel
-- **Status**: Implemented; user confirmed agent-response delivery
-- **User problem**: The user may want to receive a completion alert in Messages
-  as well as on the Mac running VS Code.
-- **Proposed behavior**: Use AppleScript through `osascript` to request a
-  message from Messages when the Copilot agent-stop hook triggers. Use
-  separate fixed messages for normal responses and questions detected by a
-  marker in the final assistant transcript. A test command sends a test
-  message after explicit confirmation.
-- **Trade-offs or open questions**: Validate macOS Automation permission,
-  marker compliance and question/response classification with live sessions.
-  A successful AppleScript command does not prove delivery. Store the
-  recipient in VS Code SecretStorage, never in the repository, and keep the
-  feature disabled by default.
-- **References**: Research and setup instructions are recorded in
-  [Project Onboarding](./ONBOARDING.md).
+- **Component**: Notification content / Copilot hook processing
+- **Status**: Built (automated tests pass; the user confirmed both summary
+  notification formats in live testing)
+- **User problem**: Generic notifications say that an agent is ready or has a
+  question, but do not help the user decide whether to switch back immediately.
+- **Proposed behavior**: For completed turns, derive a short, bounded excerpt
+  from the final assistant message in the local transcript. For interactive
+  questions, derive it from the `ask_user` tool arguments. Format notification
+  bodies as `Agent response: [response text]` or
+  `Question from agent: [question text]`; retain the generic message when
+  usable content is unavailable.
+- **Trade-offs or open questions**: Summaries are deterministic local
+  extraction, not model-generated abstracts: the first sentence or paragraph
+  is cleaned and capped at 120 characters. The matching `ask_user` hook input
+  is briefly written to the mode-0600 signal file; the extension reads and
+  removes the file before notifying. Response excerpts remain in the Copilot
+  transcript as before. Notification text can reveal private conversation
+  details in banners, previews, or iMessages; the
+  `pingWhenReady.notifications.includeSummary` setting defaults to enabled
+  for this personal-use workflow and can be disabled for generic-only text.
+  The user confirmed the prompt payload extraction and expected notification
+  formatting in a live VS Code test. Continue monitoring transcript parsing
+  and notification behavior across hook/runtime updates.
+- **References**:
+  [VS Code agent hooks guide](https://code.visualstudio.com/docs/agent-customization/hooks)
+  · [Copilot hook event inputs](https://docs.github.com/en/copilot/reference/hooks-reference#hook-event-input-payloads)
+  · [Apple: Displaying Notifications](https://developer.apple.com/library/archive/documentation/LanguagesUtilities/Conceptual/MacAutomationScriptingGuide/DisplayNotifications.html).

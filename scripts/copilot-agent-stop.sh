@@ -26,9 +26,12 @@ if [ "$hook_mode" = "question-prompt" ]; then
   signal_timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')-$$"
 
   umask 077
-  if cat >/dev/null &&
-    mkdir -p "$signal_directory" &&
-    printf '{"hookEventName":"pingWhenReadyQuestionPrompt","timestamp":"%s"}\n' "$signal_timestamp" > "$temporary_file" &&
+  if mkdir -p "$signal_directory" &&
+    {
+      printf '{"hookEventName":"pingWhenReadyQuestionPrompt","timestamp":"%s","event":' "$signal_timestamp"
+      cat
+      printf '}\n'
+    } > "$temporary_file" &&
     mv -f "$temporary_file" "$signal_file"; then
     :
   else

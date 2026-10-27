@@ -24,16 +24,17 @@ No known bugs are currently tracked.
   an `agentStop` signal while waiting. The hook fired only after the user
   answered and Copilot completed a follow-up response.
 - **Resolution**: Added a `preToolUse` hook matched only to Copilot's
-  `ask_user` tool. It writes a minimal question-prompt signal without storing
-  the question text; the extension turns that signal into the
-  “Question from agent pending” notification. The existing `agentStop` hook
-  continues to report the completed follow-up response. The user confirmed
-  the interactive-prompt notification works in a live Extension Development
-  Host session.
+  `ask_user` tool. It writes the hook event to a mode-0600 question-prompt
+  signal so the extension can extract the question text and show
+  “Question from agent: [question text]”. The extension removes the signal
+  after processing. The existing `agentStop` hook continues to report the
+  completed follow-up response. The user confirmed the interactive-prompt
+  notification works in a live Extension Development Host session.
 - **Validation**: Automated hook/configuration tests, type-checking, and
   compilation pass. Live Copilot testing confirmed the prompt notification
   arrives before answering, and the regular completion notification arrives
-  after Copilot responds to the answer.
+  after Copilot responds to the answer. Follow-up testing confirmed local
+  question and response summaries appear with the expected labels.
 - **Research**: VS Code's documented Copilot hook events do not include the
   Copilot CLI `notification` event. GitHub documents `ask_user` as a tool and
   `preToolUse` matchers as a supported way to target tools.
