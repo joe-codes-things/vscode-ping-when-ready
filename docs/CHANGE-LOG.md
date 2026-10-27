@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.1.0 - 2026-10-26
 
 - Added a macOS-only VS Code extension scaffold with a Copilot `agentStop`
   hook, native macOS notification, optional `afplay` sound, and optional
