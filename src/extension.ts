@@ -10,6 +10,7 @@ import {
   responseHasQuestionMarker,
   summarizeText,
 } from "./responseCategory";
+import { SettingsTreeDataProvider } from "./settingsView";
 
 const execFile = promisify(childProcess.execFile);
 const output = vscode.window.createOutputChannel("Ping When Ready");
@@ -227,6 +228,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   watchSignalFile(context);
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("pingWhenReady.openSettings", async () => {
+      await vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        "@ext:joe-codes-things.ping-when-ready",
+      );
+    }),
+    vscode.commands.registerCommand("pingWhenReady.openSoundSetting", async () => {
+      await vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        "@id:pingWhenReady.soundFile",
+      );
+    }),
     vscode.commands.registerCommand("pingWhenReady.enableCopilotHook", async () => {
       try {
         const signalFilePath = path.join(context.globalStorageUri.fsPath, signalFileName);
@@ -289,6 +302,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
       await notify(context);
+    }),
+  );
+
+  const settingsProvider = new SettingsTreeDataProvider();
+  const settingsView = vscode.window.createTreeView("pingWhenReady.settings", {
+    treeDataProvider: settingsProvider,
+  });
+  settingsView.onDidChangeCheckboxState((event) => {
+    void Promise.all(event.items.map(([item, state]) =>
+      settingsProvider.setChecked(item, state === vscode.TreeItemCheckboxState.Checked),
+    )).catch((error: unknown) => {
+      logError("Could not update a notification setting", error);
+    });
+  });
+  context.subscriptions.push(
+    settingsProvider,
+    settingsView,
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("pingWhenReady")) {
+        settingsProvider.refresh();
+      }
     }),
   );
 }

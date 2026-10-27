@@ -3,6 +3,7 @@
 src/**
 tests/**
 docs/**
+ui/**
 tsconfig.json
 **/*.map
 node_modules/**

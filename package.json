@@ -2,7 +2,8 @@
   "name": "ping-when-ready",
   "displayName": "Ping When Ready",
   "description": "Notify when a Copilot agent asks for input or finishes a response in VS Code.",
-  "version": "0.1.0",
+  "version": "0.2.1",
+  "icon": "resources/icon.png",
   "publisher": "joe-codes-things",
   "repository": {
     "type": "git",
@@ -30,7 +31,32 @@
     "package": "npm run compile && mkdir -p artifacts && vsce package --out artifacts/$npm_package_name-$npm_package_version.vsix"
   },
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pingWhenReady",
+          "title": "Ping When Ready",
+          "icon": "resources/ping.svg"
+        }
+      ]
+    },
+    "views": {
+      "pingWhenReady": [
+        {
+          "id": "pingWhenReady.settings",
+          "name": "Notifications"
+        }
+      ]
+    },
     "commands": [
+      {
+        "command": "pingWhenReady.openSettings",
+        "title": "Ping When Ready: Open Settings"
+      },
+      {
+        "command": "pingWhenReady.openSoundSetting",
+        "title": "Ping When Ready: Choose Sound File"
+      },
       {
         "command": "pingWhenReady.enableCopilotHook",
         "title": "Ping When Ready: Enable Copilot Notification Hooks"
@@ -52,6 +78,16 @@
         "title": "Ping When Ready: Test Agent-Stop Notification"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "pingWhenReady.openSettings",
+          "icon": "$(gear)",
+          "when": "view == pingWhenReady.settings",
+          "group": "navigation"
+        }
+      ]
+    },
     "configuration": {
       "title": "Ping When Ready",
       "properties": {

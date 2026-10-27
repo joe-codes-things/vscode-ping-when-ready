@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here.
 
+## 0.2.1 - 2026-10-27
+
+- Applied the supplied red notification-bell artwork as the extension icon and
+  created a matching SVG for the Activity Bar.
+- Kept the original icon archive in `ui/` while excluding it from packaged
+  VSIX files.
+
+## 0.2.0 - 2026-10-26
+
+- Added a Ping When Ready Activity Bar view with direct checkboxes for macOS
+  notifications, sound, iMessage, and summary text.
+- Added sidebar shortcuts for choosing the sound file, setting the iMessage
+  recipient, and opening the extension's filtered Settings page.
+
 ## 0.1.0 - 2026-10-26
 
 - Added a macOS-only VS Code extension scaffold with a Copilot `agentStop`

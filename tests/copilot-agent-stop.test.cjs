@@ -193,6 +193,88 @@ test("question marker classification uses only the final assistant message", asy
   assert.equal(summarizeText("## Summary\n\nSecond paragraph is longer."), "Summary");
 });
 
+test("settings sidebar checkboxes reflect and update global notification settings", async (t) => {
+  const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), "ping-when-ready-settings-"));
+  t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
+
+  const modulePath = path.join(temporaryRoot, "settingsView.cjs");
+  esbuild.buildSync({
+    entryPoints: [path.join(__dirname, "..", "src", "settingsView.ts")],
+    outfile: modulePath,
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    external: ["vscode"],
+  });
+
+  const values = new Map([
+    ["notifications.macOS", true],
+    ["notifications.sound", false],
+    ["notifications.iMessage", false],
+    ["notifications.includeSummary", true],
+  ]);
+  const changeListeners = [];
+  class EventEmitter {
+    event(listener) {
+      changeListeners.push(listener);
+      return { dispose() {} };
+    }
+    fire(value) {
+      for (const listener of changeListeners) listener(value);
+    }
+    dispose() {}
+  }
+  class TreeItem {
+    constructor(label) {
+      this.label = label;
+    }
+  }
+  const vscodeMock = {
+    EventEmitter,
+    TreeItem,
+    TreeItemCheckboxState: { Unchecked: 0, Checked: 1 },
+    ConfigurationTarget: { Global: 1 },
+    workspace: {
+      getConfiguration: () => ({
+        get: (key, fallback) => values.get(key) ?? fallback,
+        update: async (key, value, target) => {
+          assert.equal(target, 1);
+          values.set(key, value);
+        },
+      }),
+    },
+  };
+  const originalLoad = Module._load;
+  Module._load = function (request, parent, isMain) {
+    return request === "vscode" ? vscodeMock : originalLoad.call(this, request, parent, isMain);
+  };
+
+  try {
+    const { SettingsTreeDataProvider } = require(modulePath);
+    const provider = new SettingsTreeDataProvider();
+    const items = provider.getChildren();
+    assert.deepEqual(items.map((item) => item.label), [
+      "macOS Notifications",
+      "Sound",
+      "iMessage",
+      "Include Summary",
+      "Choose Sound File…",
+      "Set iMessage Recipient…",
+    ]);
+
+    assert.equal(provider.getTreeItem(items[0]).checkboxState, 1);
+    assert.equal(provider.getTreeItem(items[1]).checkboxState, 0);
+    await provider.setChecked(items[1], true);
+    assert.equal(values.get("notifications.sound"), true);
+    assert.equal(provider.getTreeItem(items[1]).checkboxState, 1);
+    assert.equal(provider.getTreeItem(items[4]).command.command, "pingWhenReady.openSoundSetting");
+    assert.equal(provider.getTreeItem(items[5]).command.command, "pingWhenReady.setIMessageRecipient");
+    provider.dispose();
+  } finally {
+    Module._load = originalLoad;
+  }
+});
+
 test("iMessage recipient is stored securely and send test commands require confirmation", async (t) => {
   const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), "ping-when-ready-extension-"));
   t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
@@ -239,6 +321,7 @@ test("iMessage recipient is stored securely and send test commands require confi
         onDidChange() {},
         dispose() {},
       }),
+      onDidChangeConfiguration: () => ({ dispose() {} }),
     },
     RelativePattern: class {},
     SecretStorage: class {},
@@ -249,7 +332,26 @@ test("iMessage recipient is stored securely and send test commands require confi
       },
     },
   };
+  vscodeMock.window.createTreeView = (viewId, options) => {
+    treeViewHandlers.viewId = viewId;
+    treeViewHandlers.provider = options.treeDataProvider;
+    return {
+      onDidChangeCheckboxState: (listener) => { treeViewHandlers.checkboxListener = listener; },
+      dispose() {},
+    };
+  };
+  vscodeMock.TreeItemCheckboxState = { Unchecked: 0, Checked: 1 };
+  vscodeMock.ConfigurationTarget = { Global: 1 };
+  vscodeMock.EventEmitter = class {
+    event() { return { dispose() {} }; }
+    fire() {}
+    dispose() {}
+  };
+  vscodeMock.TreeItem = class {
+    constructor(label) { this.label = label; }
+  };
   const warningMessages = [];
+  const treeViewHandlers = {};
   const originalLoad = Module._load;
   const originalExecFile = childProcess.execFile;
   childProcess.execFile = (file, args, options, callback) => {
@@ -272,6 +374,8 @@ test("iMessage recipient is stored securely and send test commands require confi
         store: async (key, value) => secretStorage.set(key, value),
       },
     });
+    assert.equal(treeViewHandlers.viewId, "pingWhenReady.settings");
+    assert.equal(treeViewHandlers.provider.getChildren().length, 6);
   } finally {
     Module._load = originalLoad;
     childProcess.execFile = originalExecFile;

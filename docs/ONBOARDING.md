@@ -28,6 +28,11 @@ channels still need validation.
   Host.
 - `tests/copilot-agent-stop.test.cjs` checks the shell signal and hook
   configuration management.
+- `src/settingsView.ts` supplies the Activity Bar view with live notification
+  toggles and shortcuts to detailed settings.
+- `resources/icon.png` uses the supplied red bell artwork for the extension
+  icon, and `resources/ping.svg` provides its Activity Bar counterpart. The
+  source artwork archive is kept in `ui/` and excluded from the VSIX package.
 - The intended audience is the project owner. Public extension distribution is
   not a goal.
 - `README.md` is the concise project entry point.
@@ -38,7 +43,9 @@ channels still need validation.
 
 Start with `README.md` for setup. Press F5 to open the Extension Development
 Host; enable or update the hooks there and start a new Copilot-targeted
-session.
+session. In a regular VS Code window, use the Ping When Ready icon in the
+Activity Bar to toggle notification channels without searching the full
+Settings UI; the view's gear opens the filtered extension settings.
 
 ## Development and research environment
 
