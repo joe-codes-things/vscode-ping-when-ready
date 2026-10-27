@@ -32,12 +32,31 @@ channels still need validation.
   toggles and shortcuts to detailed settings.
 - `resources/icon.png` uses the supplied red bell artwork for the extension
   icon, and `resources/ping.svg` provides its Activity Bar counterpart. The
-  source artwork archive is kept in `ui/` and excluded from the VSIX package.
+  source artwork archive is kept in `user-interface/` and excluded from the
+  VSIX package.
 - The intended audience is the project owner. Public extension distribution is
   not a goal.
 - `README.md` is the concise project entry point.
 - `docs/BUGS.md` tracks reported issues, and `docs/FEATURE-IDEAS.md` tracks
   design questions and potential behavior.
+
+## Repository folders
+
+- `.github/` and `.githooks/` are local/automation configuration directories
+  ignored by Git.
+- `.vscode/` contains VS Code development-host launch configuration.
+- `artifacts/` and `dist/` contain generated packages and compiled output;
+  both are ignored by Git.
+- `docs/` contains project documentation.
+- `node_modules/` contains installed dependencies and is ignored by Git.
+- `resources/` contains the extension's runtime icons.
+- `scripts/` contains the local Copilot hook script.
+- `sound-fx/` is reserved for local sound files and samples and is entirely
+  ignored by Git and excluded from VSIX packages; do not expect its contents in
+  a checkout, package, or public repository.
+- `src/` contains the extension implementation, and `tests/` contains its tests.
+- `user-interface/` contains the tracked source archive for the extension icon;
+  runtime icon files are kept in `resources/`.
 
 ## Getting familiar with the project
 
@@ -193,8 +212,12 @@ the generic-only message text.
 The VS Code API has no general audio-playback function. The current
 macOS-only implementation uses the local Node.js extension host to spawn
 `afplay` with the configured sound path. It uses an argument array rather
-than constructing a shell command from settings. Audio files are not bundled
-yet; the user plans to provide candidate WAV or MP3 files.
+than constructing a shell command from settings. The Activity Bar provides
+separate **Choose Response Sound** and **Choose Question Sound** actions that
+open VS Code's native file picker filtered to WAV and MP3 files. Selected paths
+are saved in global extension settings. If a category-specific sound is empty,
+the legacy `soundFile` setting remains a fallback for both categories.
+Audio files are not bundled.
 
 The `afplay` usage information checked does not promise a definitive codec
 list, so validate both WAV and MP3 assets on the supported macOS version

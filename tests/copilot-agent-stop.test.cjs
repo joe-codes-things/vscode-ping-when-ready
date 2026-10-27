@@ -258,7 +258,8 @@ test("settings sidebar checkboxes reflect and update global notification setting
       "Sound",
       "iMessage",
       "Include Summary",
-      "Choose Sound File…",
+      "Choose Response Sound…",
+      "Choose Question Sound…",
       "Set iMessage Recipient…",
     ]);
 
@@ -267,8 +268,9 @@ test("settings sidebar checkboxes reflect and update global notification setting
     await provider.setChecked(items[1], true);
     assert.equal(values.get("notifications.sound"), true);
     assert.equal(provider.getTreeItem(items[1]).checkboxState, 1);
-    assert.equal(provider.getTreeItem(items[4]).command.command, "pingWhenReady.openSoundSetting");
-    assert.equal(provider.getTreeItem(items[5]).command.command, "pingWhenReady.setIMessageRecipient");
+    assert.equal(provider.getTreeItem(items[4]).command.command, "pingWhenReady.chooseResponseSound");
+    assert.equal(provider.getTreeItem(items[5]).command.command, "pingWhenReady.chooseQuestionSound");
+    assert.equal(provider.getTreeItem(items[6]).command.command, "pingWhenReady.setIMessageRecipient");
     provider.dispose();
   } finally {
     Module._load = originalLoad;
@@ -296,6 +298,8 @@ test("iMessage recipient is stored securely and send test commands require confi
   const scriptCalls = [];
   let signalCreated;
   let confirmationResponse;
+  let selectedSoundFile;
+  const soundDialogCalls = [];
   const settings = {
     "pingWhenReady.notifications.macOS": false,
     "pingWhenReady.notifications.sound": false,
@@ -311,10 +315,18 @@ test("iMessage recipient is stored securely and send test commands require confi
         return confirmationResponse;
       },
       showInputBox: async () => recipient,
+      showOpenDialog: async (options) => {
+        soundDialogCalls.push(options);
+        return selectedSoundFile ? [{ fsPath: selectedSoundFile }] : undefined;
+      },
     },
     workspace: {
       getConfiguration: () => ({
         get: (key, fallback) => settings[`pingWhenReady.${key}`] ?? fallback,
+        update: async (key, value, target) => {
+          assert.equal(target, 1);
+          settings[`pingWhenReady.${key}`] = value;
+        },
       }),
       createFileSystemWatcher: () => ({
         onDidCreate: (listener) => { signalCreated = listener; },
@@ -375,7 +387,7 @@ test("iMessage recipient is stored securely and send test commands require confi
       },
     });
     assert.equal(treeViewHandlers.viewId, "pingWhenReady.settings");
-    assert.equal(treeViewHandlers.provider.getChildren().length, 6);
+    assert.equal(treeViewHandlers.provider.getChildren().length, 7);
   } finally {
     Module._load = originalLoad;
     childProcess.execFile = originalExecFile;
@@ -383,6 +395,21 @@ test("iMessage recipient is stored securely and send test commands require confi
 
   await registeredCommands.get("pingWhenReady.setIMessageRecipient")();
   assert.equal(secretStorage.get("pingWhenReady.iMessageRecipient"), recipient);
+
+  selectedSoundFile = "/sounds/agent-response.MP3";
+  await registeredCommands.get("pingWhenReady.chooseResponseSound")();
+  assert.equal(settings["pingWhenReady.responseSoundFile"], selectedSoundFile);
+  assert.deepEqual(soundDialogCalls.at(-1).filters, { "Audio files": ["wav", "mp3"] });
+
+  selectedSoundFile = "/sounds/agent-question.wav";
+  await registeredCommands.get("pingWhenReady.chooseQuestionSound")();
+  assert.equal(settings["pingWhenReady.questionSoundFile"], selectedSoundFile);
+  assert.equal(soundDialogCalls.length, 2);
+
+  selectedSoundFile = undefined;
+  const responseSoundBeforeCancel = settings["pingWhenReady.responseSoundFile"];
+  await registeredCommands.get("pingWhenReady.chooseResponseSound")();
+  assert.equal(settings["pingWhenReady.responseSoundFile"], responseSoundBeforeCancel);
 
   await registeredCommands.get("pingWhenReady.sendTestIMessage")();
   assert.equal(scriptCalls.length, 0);

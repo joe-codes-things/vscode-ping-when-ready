@@ -2,7 +2,7 @@
   "name": "ping-when-ready",
   "displayName": "Ping When Ready",
   "description": "Notify when a Copilot agent asks for input or finishes a response in VS Code.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "icon": "resources/icon.png",
   "publisher": "joe-codes-things",
   "repository": {
@@ -58,6 +58,14 @@
         "title": "Ping When Ready: Choose Sound File"
       },
       {
+        "command": "pingWhenReady.chooseResponseSound",
+        "title": "Ping When Ready: Choose Response Sound"
+      },
+      {
+        "command": "pingWhenReady.chooseQuestionSound",
+        "title": "Ping When Ready: Choose Question Sound"
+      },
+      {
         "command": "pingWhenReady.enableCopilotHook",
         "title": "Ping When Ready: Enable Copilot Notification Hooks"
       },
@@ -106,7 +114,18 @@
         "pingWhenReady.soundFile": {
           "type": "string",
           "default": "",
+          "deprecationMessage": "Use Response Sound File and Question Sound File. This setting remains as a fallback for both notification types.",
           "description": "Absolute path to a WAV or MP3 notification sound on this Mac."
+        },
+        "pingWhenReady.responseSoundFile": {
+          "type": "string",
+          "default": "",
+          "description": "WAV or MP3 sound file used when an agent finishes a response. Use Ping When Ready: Choose Response Sound to select a file."
+        },
+        "pingWhenReady.questionSoundFile": {
+          "type": "string",
+          "default": "",
+          "description": "WAV or MP3 sound file used when an agent asks a question. Use Ping When Ready: Choose Question Sound to select a file."
         },
         "pingWhenReady.notifications.iMessage": {
           "type": "boolean",

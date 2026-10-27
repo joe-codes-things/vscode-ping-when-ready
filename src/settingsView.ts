@@ -40,9 +40,15 @@ const toggleItems: SettingsItem[] = [
 const actionItems: SettingsItem[] = [
   {
     kind: "action",
-    label: "Choose Sound File…",
-    command: "pingWhenReady.openSoundSetting",
-    tooltip: "Open the setting for the WAV or MP3 sound file.",
+    label: "Choose Response Sound…",
+    command: "pingWhenReady.chooseResponseSound",
+    tooltip: "Choose a WAV or MP3 sound for completed agent responses.",
+  },
+  {
+    kind: "action",
+    label: "Choose Question Sound…",
+    command: "pingWhenReady.chooseQuestionSound",
+    tooltip: "Choose a WAV or MP3 sound for agent questions.",
   },
   {
     kind: "action",

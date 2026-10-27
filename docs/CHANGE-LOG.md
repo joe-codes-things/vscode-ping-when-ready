@@ -2,11 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## 0.2.2 - 2026-10-27
+
+- Added native file-picker commands to choose separate WAV or MP3 sounds for
+  agent responses and agent questions.
+- Retained the previous shared sound setting as a fallback for both types.
+- Renamed the tracked icon source folder to `user-interface/` and excluded the
+  entirely Git-ignored `sound-fx/` folder from source control.
+
 ## 0.2.1 - 2026-10-27
 
 - Applied the supplied red notification-bell artwork as the extension icon and
   created a matching SVG for the Activity Bar.
-- Kept the original icon archive in `ui/` while excluding it from packaged
+- Kept the original icon archive in `user-interface/` while excluding it from packaged
   VSIX files.
 
 ## 0.2.0 - 2026-10-26

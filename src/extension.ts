@@ -57,10 +57,9 @@ async function showNativeNotification(message: string): Promise<void> {
   ]);
 }
 
-async function playSound(): Promise<void> {
-  const filePath = setting<string>("soundFile", "");
+async function playSound(filePath: string): Promise<void> {
   if (!filePath) {
-    throw new Error("Set Ping When Ready: Sound File to an absolute WAV or MP3 path before enabling sound.");
+    throw new Error("Choose a WAV or MP3 file for this notification type before enabling sound.");
   }
   if (![".wav", ".mp3"].includes(path.extname(filePath).toLowerCase())) {
     throw new Error("The selected sound file must have a .WAV or .MP3 extension.");
@@ -109,7 +108,9 @@ async function notify(
     work.push(showNativeNotification(notificationMessage));
   }
   if (setting<boolean>("notifications.sound", false)) {
-    work.push(playSound());
+    const soundSetting = message === questionNotification ? "questionSoundFile" : "responseSoundFile";
+    const filePath = setting<string>(soundSetting, "") || setting<string>("soundFile", "");
+    work.push(playSound(filePath));
   }
   if (includeIMessage && setting<boolean>("notifications.iMessage", false)) {
     work.push(sendIMessage(context, notificationMessage));
@@ -237,8 +238,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("pingWhenReady.openSoundSetting", async () => {
       await vscode.commands.executeCommand(
         "workbench.action.openSettings",
-        "@id:pingWhenReady.soundFile",
+        "@id:pingWhenReady.responseSoundFile",
       );
+    }),
+    vscode.commands.registerCommand("pingWhenReady.chooseResponseSound", async () => {
+      await chooseSoundFile("responseSoundFile", "Choose Agent Response Sound");
+    }),
+    vscode.commands.registerCommand("pingWhenReady.chooseQuestionSound", async () => {
+      await chooseSoundFile("questionSoundFile", "Choose Agent Question Sound");
     }),
     vscode.commands.registerCommand("pingWhenReady.enableCopilotHook", async () => {
       try {
@@ -325,6 +332,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
   );
+
+  async function chooseSoundFile(settingKey: string, title: string): Promise<void> {
+    const selected = await vscode.window.showOpenDialog({
+      title,
+      canSelectMany: false,
+      canSelectFiles: true,
+      canSelectFolders: false,
+      filters: { "Audio files": ["wav", "mp3"] },
+      openLabel: "Select Sound",
+    });
+    const filePath = selected?.[0]?.fsPath;
+    if (!filePath) {
+      return;
+    }
+    if (![".wav", ".mp3"].includes(path.extname(filePath).toLowerCase())) {
+      vscode.window.showErrorMessage("Ping When Ready: Select a WAV or MP3 audio file.");
+      return;
+    }
+    await vscode.workspace
+      .getConfiguration("pingWhenReady")
+      .update(settingKey, filePath, vscode.ConfigurationTarget.Global);
+    vscode.window.showInformationMessage(`Ping When Ready: Saved ${path.basename(filePath)}.`);
+  }
 }
 
 export function deactivate(): void {

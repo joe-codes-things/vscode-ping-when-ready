@@ -15,9 +15,9 @@ duplicate behavior still need validation.
 3. In the normal VS Code window, click the **Ping When Ready** icon in the
    Activity Bar (the vertical icon strip on the left). Its **Notifications**
    view has checkboxes for macOS notifications, sound, iMessage, and summary
-   text. Use the view's gear button to open the extension's filtered Settings,
-   or choose **Choose Sound File…** and **Set iMessage Recipient…** directly
-   in the view.
+   text. Use **Choose Response Sound…** and **Choose Question Sound…** to
+   select separate WAV or MP3 files in the native file picker, and
+   **Set iMessage Recipient…** to configure Messages.
 4. In the Extension Development Host, run **Ping When Ready: Enable Copilot Notification Hooks**
    to install or update the user-level Copilot hooks. Start a new Copilot
    session; its session-start hook supplies the marker instruction to the agent.
@@ -38,7 +38,8 @@ duplicate behavior still need validation.
    compiled bundle is in `dist/`; the installable package is written to
    `artifacts/`.
 
-The extension uses the red notification-bell artwork supplied in `ui/` for its
+The extension uses the red notification-bell artwork supplied in
+`user-interface/` for its
 extension icon. `resources/icon.png` is the VS Code extension-list icon, and
 `resources/ping.svg` is the matching Activity Bar icon. The source archive is
 kept in the repository but excluded from the packaged VSIX.
@@ -55,7 +56,10 @@ extension uses **“Question from agent pending.”** or
 missing it still produces the normal completion notification.
 
 The macOS banner is enabled by default. Sound and iMessage are off by default.
-Configure a WAV or MP3 path in Settings before enabling sound. iMessage sends
+Enable **Sound**, then choose separate WAV or MP3 files for agent responses
+and questions from the sidebar; either can be left unconfigured, but a sound
+must be selected for each notification type you want to hear. Existing
+`soundFile` settings remain as a fallback for both types. iMessage sends
 through Messages using AppleScript; macOS may ask you to grant VS Code
 automation access. Test sends are explicitly confirmed. The extension does
 not log the phone number or include it in the repository.

@@ -3,7 +3,8 @@
 src/**
 tests/**
 docs/**
-ui/**
+user-interface/**
+sound-fx/**
 tsconfig.json
 **/*.map
 node_modules/**
